@@ -161,9 +161,9 @@ ENGINES = {
         dict(whine=1100, hiss=0.35, rumble=0.9),
         dict(whine=1600, hiss=0.7, rumble=1.0))),
     "airliner": dict(kind="turbine", gain=0.24, layers=(
-        dict(whine=420, hiss=0.08, rumble=1.0),
-        dict(whine=620, hiss=0.18, rumble=1.0),
-        dict(whine=840, hiss=0.32, rumble=1.0))),
+        dict(whine=0, hiss=0.10, rumble=1.0),        # no whine: just a deep rumble and rushing air
+        dict(whine=0, hiss=0.22, rumble=1.0),
+        dict(whine=0, hiss=0.38, rumble=1.0))),
 }
 LAYER_GAIN = (0.6, 0.8, 1.0)
 
@@ -194,7 +194,7 @@ def make_engine_layer(rng, kind, params, seconds=1.0):
             out.append(tone * 0.5 + noise[i][0] * params["noise"] * 1.5 + noise[i][1] * params["noise"] * 3)
         else:
             w = params["whine"]
-            tone = 0.22 * sin[(w * i) % RATE] + 0.09 * sin[(2 * w * i) % RATE]
+            tone = (0.22 * sin[(w * i) % RATE] + 0.09 * sin[(2 * w * i) % RATE]) if w else 0.0
             out.append(tone + noise[i][0] * params["hiss"] + noise[i][1] * params["rumble"] * 4.0)
     return out
 

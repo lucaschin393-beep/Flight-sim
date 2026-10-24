@@ -247,6 +247,11 @@ class SoundTests(unittest.TestCase):
                 self.assertLess(abs(loop[0] - loop[-1]), 3 * max(step, 0.05), spec.name)  # no seam click
                 self.assertGreater(max(abs(x) for x in loop), 0.1)
 
+    def test_airliner_engine_has_no_whine(self):
+        from sim import sound
+        self.assertTrue(all(layer["whine"] == 0 for layer in sound.ENGINES["airliner"]["layers"]))
+        self.assertTrue(all(layer["whine"] > 0 for layer in sound.ENGINES["jet"]["layers"]))
+
     def test_gear_and_wheel_effects_exist(self):
         import random
         from sim import sound
