@@ -4,20 +4,23 @@ import sys
 import pygame
 
 from sim import config as cfg
+from sim.aircraft import AIRCRAFT
 from sim.camera import FIRST_PERSON, VIEWS, Camera
+from sim.explosion import LINGER, SMOULDER, Explosion
 from sim.hud import Hud
+from sim.sound import Sounds
 from sim.plane import Plane
 from sim.renderer import Renderer
-from sim.world import World, on_runway
-
-GROUND_CLEARANCE = 1.0
-
+from sim.world import World
 
 def landing_status(plane):
     """Called when the plane reaches the ground: ('Landed!' | 'Crashed!', colour)."""
-    gentle = (plane.speed < 55 and abs(plane.pitch) < 0.2 and abs(plane.roll) < 0.2
-              and plane.vertical_speed > -6)
-    if on_runway(plane.pos) and gentle:
+    gentle = (plane.speed < plane.spec.land_speed
+              and abs(plane.pitch) < cfg.LAND_MAX_ATTITUDE and abs(plane.roll) < cfg.LAND_MAX_ATTITUDE
+              and plane.vertical_speed > -cfg.LAND_MAX_SINK)
+    if not plane.gear_locked_down:
+        return ("CRASHED - landing gear not down!", (255, 90, 80))
+    if gentle:
         return ("Landed safely!", (120, 230, 140))
     return ("CRASHED!", (255, 90, 80))
 
@@ -32,7 +35,10 @@ def main():
     width, height = cfg.WINDOW_SIZE
     camera, renderer, hud = Camera(width, height), Renderer(width, height), Hud(width, height)
     world, plane = World(), Plane()
-    view_index, status = 0, None
+    view_index, status, paused = 0, None, False
+    sounds = Sounds()
+    explosion = None
+    landed_at = None          # (position, heading) of the last safe landing
 
     while True:
         dt = min(clock.tick(cfg.FPS) / 1000.0, 0.05)
@@ -46,34 +52,87 @@ def main():
                 if event.key == pygame.K_p:
                     view_index = (view_index + 1) % len(VIEWS)
                     camera.snap_next_update()
+                elif event.key in (pygame.K_SPACE, pygame.K_PAUSE):
+                    paused = not paused
+                    sounds.pause(paused)
+                elif event.key == pygame.K_c or pygame.K_1 <= event.key < pygame.K_1 + len(AIRCRAFT):
+                    if status is None:
+                        i = (AIRCRAFT.index(plane.spec) + 1) % len(AIRCRAFT) if event.key == pygame.K_c \
+                            else event.key - pygame.K_1
+                        plane.set_spec(AIRCRAFT[i])
+                        camera.snap_next_update()
+                elif event.key == pygame.K_g:
+                    if status is None:
+                        if not plane.toggle_gear():
+                            hud.notify("Can't raise the landing gear on the ground")
+                elif event.key == pygame.K_m:
+                    hud.notify("Sound off" if sounds.toggle_mute() else "Sound on")
                 elif event.key == pygame.K_h:
                     hud.show_help = not hud.show_help
                 elif event.key == pygame.K_r:
-                    plane.reset()
+                    if landed_at and status and status[0].startswith("Landed"):
+                        plane.reset_at(*landed_at)         # carry on from where you touched down
+                    else:
+                        plane.reset()
                     camera.snap_next_update()
                     status = None
+                    explosion = None
+                    sounds.stop()
+                    paused = False
 
-        if status is None:
+        if status is None and not paused:
             keys = pygame.key.get_pressed()
             pitch_in = (keys[pygame.K_s] - keys[pygame.K_w]) * (-1 if cfg.INVERT_PITCH else 1)
             roll_in = keys[pygame.K_d] - keys[pygame.K_a]
             throttle_in = ((keys[pygame.K_LSHIFT] or keys[pygame.K_UP])
                            - (keys[pygame.K_LCTRL] or keys[pygame.K_DOWN]))
-            plane.update(dt, pitch_in, roll_in, throttle_in)
+            prev_pos = plane.pos
+            plane.update(dt, pitch_in, roll_in, throttle_in, keys[pygame.K_b])
 
-            if plane.altitude <= GROUND_CLEARANCE:
-                status = landing_status(plane)
-                if status[0] != "CRASHED!":
-                    plane.pos = (plane.pos[0], GROUND_CLEARANCE, plane.pos[2])
-            elif world.hits_obstacle(plane.pos):
+            if world.hits_plane(plane, prev_pos):
                 status = ("CRASHED!", (255, 90, 80))
+            elif not plane.on_ground and plane.altitude <= plane.spec.ground_clearance:
+                status = landing_status(plane)
+                if not status[0].startswith("CRASHED"):
+                    plane.pos = (plane.pos[0], plane.spec.ground_clearance, plane.pos[2])
+                    landed_at = (plane.pos, plane.yaw)
+
+        if explosion is None and status and status[0].startswith("CRASHED"):
+            fwd = plane.basis[0]
+            explosion = Explosion(plane.pos, tuple(c * plane.speed for c in fwd),
+                                  plane.spec.bounding_radius / 5.5, polys=plane.world_polys(flame=False),
+                                  intensity=max(0.35, min(1.3, plane.speed / 60.0)))
+            sounds.crash(plane.speed / 60.0)
+            view_index = 0                    # watch it from outside, in 3rd person
+            camera.snap_next_update()
+        if explosion and not paused:
+            explosion.update(dt)
+            # fire roars while the wreck burns hard, then dies down as it smoulders
+            ramp_in = min(explosion.age / 0.6, 1.0)
+            burn_down = 1.0 if explosion.age < LINGER else max(0.0, (SMOULDER - explosion.age) / (SMOULDER - LINGER))
+            sounds.fire_level(ramp_in * (0.25 + 0.75 * burn_down))
+
+        quiet = paused or status is not None
+        sounds.afterburner(0.0 if quiet else plane.spec.exhaust_power(plane.throttle), dt)
 
         view = VIEWS[view_index]
-        camera.follow(plane, view, dt)
-        renderer.render(screen, camera, world, plane, draw_plane=(view != FIRST_PERSON))
+        camera.follow(plane, view, 0.0 if paused else dt)
+        true_pos = camera.pos
+        if explosion and not paused:          # jolt the view with the blast
+            camera.pos = tuple(c + o for c, o in zip(true_pos, explosion.camera_shake()))
+        renderer.render(screen, camera, world, plane, draw_plane=(view != FIRST_PERSON),
+                        wrecked=explosion is not None,
+                        extra_decals=explosion.ground_decals() if explosion else (),
+                        extra_polys=explosion.wreckage_polys() if explosion else ())
+        camera.pos = true_pos
+        if explosion:
+            explosion.draw(screen, camera)
+            explosion.draw_flash(screen)
         if view == FIRST_PERSON:
             hud.cockpit(screen)
         hud.draw(screen, plane, view, status)
+        if paused:
+            hud.paused(screen)
         pygame.display.flip()
 
 

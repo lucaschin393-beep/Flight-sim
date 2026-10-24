@@ -59,8 +59,12 @@ def _building(rng, x, z):
 def _tree(rng, x, z):
     h = rng.uniform(10, 22)
     g = rng.randint(80, 130)
-    return Obj(cone(x, 0, z, h * 0.35, h, 4, [(40, g, 55), (30, g - 15, 45)]),
-               (x, h / 2, z), h)
+    base = h * 0.35
+
+    def hit(p):
+        return 0.0 <= p[1] < h and math.hypot(p[0] - x, p[2] - z) < base * (1.0 - p[1] / h)
+
+    return Obj(cone(x, 0, z, base, h, 4, [(40, g, 55), (30, g - 15, 45)]), (x, h / 2, z), h, hit)
 
 
 class World:
@@ -108,4 +112,23 @@ class World:
         for obj in self.nearby_objects(pos):
             if obj.hit and obj.hit(pos):
                 return True
+        return False
+
+    def hits_plane(self, plane, prev_pos=None):
+        """True if any sampled point of the plane is inside a mountain, building or tree.
+
+        Also tests halfway along the last step so fast planes can't skip through thin trees.
+        """
+        reach = plane.spec.bounding_radius
+        spots = [plane.pos] if prev_pos is None else [
+            tuple((a + b) / 2.0 for a, b in zip(prev_pos, plane.pos)), plane.pos]
+        for spot in spots:
+            points = None
+            for obj in self.nearby_objects(spot):
+                if not obj.hit or math.dist(obj.center, spot) > obj.radius + reach:
+                    continue
+                if points is None:
+                    points = plane.collision_points(spot)
+                if any(obj.hit(p) for p in points):
+                    return True
         return False

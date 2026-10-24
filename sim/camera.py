@@ -30,17 +30,19 @@ class Camera:
     def follow(self, plane, view, dt):
         fwd, _, up = plane.basis
         if view == FIRST_PERSON:
-            pos = add(add(plane.pos, scale(up, 0.9)), scale(fwd, 2.2))
+            eye_up, eye_fwd = plane.spec.eye
+            pos = add(add(plane.pos, scale(up, eye_up)), scale(fwd, eye_fwd))
             self.set_basis(pos, fwd, up)
             return
 
         # Chase camera: behind and above, easing toward the target.
         soft_up = normalize(lerp((0.0, 1.0, 0.0), up, 0.35))
-        target = add(add(plane.pos, scale(fwd, -20.0)), scale(soft_up, 6.0))
+        target = add(add(plane.pos, scale(fwd, -plane.spec.chase_distance)),
+                     scale(soft_up, plane.spec.chase_height))
         pos = target if self._snap else lerp(self.pos, target, min(1.0, 6.0 * dt))
         self._snap = False
         pos = (pos[0], max(pos[1], 2.0), pos[2])
-        look_at = add(plane.pos, scale(fwd, 10.0))
+        look_at = add(plane.pos, scale(fwd, plane.spec.chase_distance / 2.0))
         self.set_basis(pos, sub(look_at, pos), soft_up)
 
     def to_camera(self, p):

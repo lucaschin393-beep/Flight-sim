@@ -9,17 +9,38 @@ FOV_DEGREES = 70
 INVERT_PITCH = False
 
 # Flight model (units: metres, seconds)
-MIN_SPEED = 30.0       # speed at idle throttle
-MAX_SPEED = 100.0      # speed at full throttle
 STALL_SPEED = 25.0
-PITCH_RATE = 0.9       # rad/s
-ROLL_RATE = 1.8        # rad/s
-THROTTLE_RATE = 0.5    # per second
+MAX_SPEED = 100.0      # level-flight speed at full throttle
+MIN_SPEED = 30.0       # level-flight speed at idle throttle
+DRAG = 0.0005          # deceleration per speed^2
+IDLE_THRUST = DRAG * MIN_SPEED ** 2    # m/s^2 of thrust at idle / full throttle,
+MAX_THRUST = DRAG * MAX_SPEED ** 2     # chosen so the speeds above hold in level flight
+GEAR_DRAG = 0.25       # extra drag fraction with the gear fully down
+GEAR_TIME = 2.0        # seconds for the gear to move up / down
+MAX_GROUND_SPEED = 300 / 3.6   # 300 km/h, in m/s
+GROUND_FRICTION = 0.5  # m/s^2 rolling resistance while on the ground
+WHEEL_BRAKE = 8.0      # m/s^2 extra deceleration from the brake key on the ground
+TAXI_TURN_RATE = 0.6   # rad/s nose-wheel steering
+BRAKE_DRAG = 6.0       # air brake multiplies drag by (1 + this)
+BRAKE_RATE = 2.0       # how fast the air brake deploys / retracts (1/s)
+INDUCED_DRAG = 2.0     # extra deceleration when pulling g in a steep bank
+PITCH_RATE = 0.8       # rad/s at full elevator
+ROLL_RATE = 1.6        # rad/s at full aileron
+CONTROL_LAG = 5.0      # how quickly control surfaces follow the keys (1/s)
+CONTROL_SPEED = 55.0   # speed at which controls reach full authority
+BANK_NOSE_DROP = 0.4   # rad/s of nose drop per unit of (1 - cos(bank))
+TURN_FACTOR = 2.0      # >1 makes turns tighter than physically exact
+MAX_TURN_RATE = 0.9    # rad/s
+THROTTLE_RATE = 0.4    # per second
 MAX_PITCH = 1.3        # rad (~75 degrees)
 MAX_ROLL = 1.35        # rad (~77 degrees)
 
 START_POSITION = (0.0, 140.0, -900.0)
 START_SPEED = 65.0
+
+# Landing limits (the landing speed itself is per aircraft, see sim/aircraft.py)
+LAND_MAX_ATTITUDE = 0.2    # rad of pitch / roll
+LAND_MAX_SINK = 6.0        # m/s
 
 # Rendering
 FOG_START = 1400.0

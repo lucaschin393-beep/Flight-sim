@@ -21,32 +21,64 @@ python3 -m venv .venv
 | `W` / `S` | Nose down / nose up |
 | `A` / `D` | Bank (and turn) left / right |
 | `Shift` / `Ctrl` (or `↑` / `↓`) | Throttle up / down |
+| `B` (hold) | Air brake: heavy extra drag to shed speed |
+| `G` | Landing gear up / down (starts up; can't be raised while on the ground) |
+| `C` (or `1`–`4`) | Change aircraft |
+| `Space` | Pause / resume |
 | `P` | Change view (3rd person ⇄ 1st person) |
-| `R` | Restart |
+| `R` | Restart (after a safe landing: carry on from where you landed, ready to taxi and take off) |
+| `M` | Mute / unmute sound |
 | `H` | Show / hide the help text |
 | `Esc` | Quit |
 
 Prefer `W` = climb? Set `INVERT_PITCH = True` in `sim/config.py`.
 
+## Aircraft
+
+| Key | Aircraft | Character |
+|-----|----------|-----------|
+| `1` | Skylark trainer | Forgiving all-rounder |
+| `2` | Barnstormer biplane | Slow, light and nimble |
+| `3` | Falcon jet | Very fast, snappy roll, high landing speed; afterburner flame and roar |
+| `4` | Atlas airliner | Big, heavy, sluggish; needs wide turns and gentle inputs |
+
+Switching mid-flight keeps your position and attitude (not available after a crash or landing).
+
 ## Flying tips
 
 - You start airborne over the runway's start, heading north.
 - Banking turns the plane; level the wings by releasing `A`/`D`.
+- Flight is physics-flavoured: thrust vs. drag, gravity slows climbs and speeds dives,
+  controls lag the keys and weaken at low speed, and banking pulls the nose down, so
+  add back-pressure (`S`) in turns. Tune it in `sim/config.py`.
 - Climbing bleeds speed. Below stall speed the plane sinks and the nose drops — push `W`
   and add throttle to recover.
-- Touch down on the runway, gently (level wings, low speed, slow descent) to **land**.
-  Hitting the ground elsewhere, a mountain or a building is a **crash**.
+- Lower the landing gear with `G` before touching down: landing with it up (or still
+  moving) is a crash. With the gear down the HUD (bottom left) shows the speed limit for your aircraft. Cut the throttle and
+  hold `B` to slow down; the brake backs off near stall speed so it can't stall you.
+- After a safe landing, `R` parks you right there on the ground. Hold `Shift` for throttle,
+  steer with `A`/`D`, brake with `B`, and pull back (`S`) above the rotate speed shown on screen.
+  Ground speed is capped at 300 km/h.
+  Crashing or restarting mid-flight sends you back to the start.
+- Touch down gently, on the runway or anywhere else on open ground (level wings, low speed, slow descent) to **land**.
+  Hitting the ground too fast or unlevel, or touching a mountain, building or tree with *any* part of the plane (wingtip,
+  tail, propeller, wheels) is a **crash**: the plane blows apart (the view switches to 3rd person).
+  The wreck breaks into tumbling pieces that land, char and smoulder beside a scorch mark;
+  the blast is bigger the faster you hit, and the camera shakes, and you hear a boom followed by crackling fire that dies down.
 
 ## Layout
 
 ```
 main.py            game loop, input, view switching, landing/crash rules
 sim/config.py      tunable settings (speeds, fog, window size, pitch inversion)
+sim/aircraft.py    the four aircraft: handling numbers, mesh, camera offsets
 sim/plane.py       flight model + the plane's low-poly mesh in world space
 sim/camera.py      1st-person and chase cameras, projection
 sim/world.py       runway and chunked procedural world with collisions
 sim/renderer.py    projection, near/screen clipping, fog, painter's algorithm
 sim/meshes.py      box / cone / airplane shape builders
+sim/sound.py      generated crash, fire and afterburner sounds (no audio files)
+sim/explosion.py  crash: fireball, tumbling wreckage, scorch mark, smoke
 sim/hud.py         flight data, throttle bar, cockpit frame
 tests/             logic tests (no display needed)
 ```

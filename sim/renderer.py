@@ -9,10 +9,10 @@ from .world import runway_polys
 
 NEAR = 0.5
 LIGHT = normalize((0.4, 0.8, -0.3))
+SUN_FOR_SHADOW = (0.15, 1.0, -0.1)     # steeper than LIGHT so the shadow stays close below you
 TILE = 400.0
 TILE_RADIUS = 7
 TILE_COLORS = ((98, 150, 92), (90, 140, 84))
-SHADOW_COLOR = (58, 92, 56)
 
 
 def clip_near(poly):
@@ -106,7 +106,7 @@ class Renderer:
             r = self._project(cam, poly[0])
             if r is None or r[0] > cfg.FOG_END:
                 continue
-            color = shade(poly[1], poly[2]) if lit else poly[1]
+            color = shade(poly[1], poly[2]) if lit and poly[2] is not None else poly[1]
             items.append((r[0], apply_fog(color, r[0]), r[1]))
         return items
 
@@ -139,24 +139,43 @@ class Renderer:
                                (x0, 0, z0 + TILE)], color, None))
         self._paint(surface, self._items(cam, tiles, False))
 
-    def _shadow(self, plane):
-        fwd_x, fwd_z = math.sin(plane.yaw), math.cos(plane.yaw)
-        rx, rz = fwd_z, -fwd_x
-        px, pz = plane.pos[0], plane.pos[2]
-        pts = []
-        for a, b in ((-5.5, -3.5), (5.5, -3.5), (5.5, 3.5), (-5.5, 3.5)):
-            pts.append((px + rx * a + fwd_x * b, 0.15, pz + rz * a + fwd_z * b))
-        return [(pts, SHADOW_COLOR, None)]
+    def _draw_shadow(self, surface, cam, plane):
+        """The plane's real silhouette cast along the sun direction onto the ground.
 
-    def render(self, surface, cam, world, plane, draw_plane):
+        Drawn as one translucent layer, so overlapping parts don't darken twice; it fades
+        with altitude.
+        """
+        lx, ly, lz = SUN_FOR_SHADOW
+        shapes = []
+        for verts, _, _ in plane.world_polys(flame=False):
+            ground = [(x - lx / ly * y, 0.12, z - lz / ly * y) for x, y, z in verts]
+            r = self._project(cam, ground)
+            if r:
+                shapes.append(r[1])
+        if not shapes:
+            return
+        xs = [p[0] for pts in shapes for p in pts]
+        ys = [p[1] for pts in shapes for p in pts]
+        x0, y0 = int(max(min(xs), 0)), int(max(min(ys), 0))
+        x1, y1 = int(min(max(xs), self.w)) + 1, int(min(max(ys), self.h)) + 1
+        if x1 <= x0 or y1 <= y0:
+            return
+        layer = pygame.Surface((x1 - x0, y1 - y0), pygame.SRCALPHA)
+        alpha = int(120 - 80 * min(plane.altitude / 500.0, 1.0))
+        for pts in shapes:
+            pygame.draw.polygon(layer, (10, 14, 10, alpha), [(px - x0, py - y0) for px, py in pts])
+        surface.blit(layer, (x0, y0))
+
+    def render(self, surface, cam, world, plane, draw_plane, wrecked=False, extra_decals=(),
+               extra_polys=()):
         surface.blit(self.sky, (0, 0))
         self._ground(surface, cam)
 
         decals = list(self.runway)
-        decals = [(v, c, None) for v, c in decals]
-        if plane.altitude < 700:
-            decals += self._shadow(plane)
+        decals = [(v, c, None) for v, c in decals] + list(extra_decals)
         self._paint(surface, self._items(cam, decals, False), sort=False)
+        if plane.altitude < 700 and not wrecked:
+            self._draw_shadow(surface, cam, plane)
 
         items = []
         for obj in world.nearby_objects(cam.pos):
@@ -166,6 +185,7 @@ class Renderer:
             if dot(d, d) > (cfg.FOG_END + obj.radius) ** 2:
                 continue
             items += self._items(cam, obj.polys, True)
-        if draw_plane:
+        items += self._items(cam, extra_polys, True)
+        if draw_plane and not wrecked:
             items += self._items(cam, plane.world_polys(), True)
         self._paint(surface, items)

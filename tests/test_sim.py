@@ -7,6 +7,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from sim import config as cfg  # noqa: E402
+from sim.aircraft import AIRCRAFT  # noqa: E402
 from sim.camera import Camera, FIRST_PERSON, THIRD_PERSON  # noqa: E402
 from sim.plane import Plane  # noqa: E402
 from sim.vec import cross, dot, euler_basis, length  # noqa: E402
@@ -81,6 +82,189 @@ class PlaneTests(unittest.TestCase):
         p.reset()
         self.assertEqual(p.pos, cfg.START_POSITION)
         self.assertEqual((p.yaw, p.pitch, p.roll), (0, 0, 0))
+
+
+class BrakeTests(unittest.TestCase):
+    def test_air_brake_slows_faster_without_stalling(self):
+        free, braked = Plane(), Plane()
+        for p, b in ((free, False), (braked, True)):
+            for _ in range(60 * 6):
+                p.update(1 / 60.0, 0, 0, -1, b)
+        self.assertLess(braked.speed, free.speed - 5)
+        fly_on = Plane()
+        for _ in range(60 * 60):
+            fly_on.update(1 / 60.0, 0, 0, -1, True)
+        self.assertGreater(fly_on.speed, cfg.STALL_SPEED)
+
+
+class GearTests(unittest.TestCase):
+    def test_gear_takes_time_and_unlocks_landing(self):
+        p = Plane()
+        self.assertFalse(p.gear_locked_down)
+        p.toggle_gear()
+        fly(p, 0.5)
+        self.assertFalse(p.gear_locked_down)
+        fly(p, 2.0)
+        self.assertTrue(p.gear_locked_down)
+        self.assertGreater(len(p.world_polys()), 0)
+        p.toggle_gear()
+        fly(p, 2.5)
+        self.assertEqual(p.gear, 0.0)
+
+
+class GroundTests(unittest.TestCase):
+    def test_restart_on_ground_then_take_off(self):
+        p = Plane()
+        p.reset_at((100.0, 0.0, 200.0), 1.0)
+        self.assertTrue(p.on_ground)
+        self.assertEqual((p.pos[0], p.pos[2], p.yaw, p.speed), (100.0, 200.0, 1.0, 0.0))
+        fly(p, 3)                                    # idle: stays parked
+        self.assertEqual(p.speed, 0.0)
+        for _ in range(60 * 30):
+            p.update(1 / 60.0, 1 if p.speed > p.spec.rotate_speed else 0, 0, 1)
+            if not p.on_ground:
+                break
+        self.assertFalse(p.on_ground)
+        self.assertFalse(p.stalled)
+
+    def test_gear_cannot_be_raised_while_on_ground(self):
+        p = Plane()
+        p.reset_at((0.0, 0.0, 0.0), 0.0)
+        self.assertFalse(p.toggle_gear())
+        fly(p, 3)
+        self.assertTrue(p.gear_locked_down)
+
+    def test_ground_speed_is_capped_at_300_kmh(self):
+        p = Plane()
+        p.reset_at((0.0, 0.0, 0.0), 0.0)
+        fly(p, 60, throttle=1)               # never pulls up, so stays on the ground
+        self.assertTrue(p.on_ground)
+        self.assertLessEqual(p.speed * 3.6, 300.0 + 1e-6)
+
+    def test_cannot_rotate_below_rotate_speed(self):
+        p = Plane()
+        p.reset_at((0.0, 0.0, 0.0), 0.0)
+        fly(p, 2, pitch=1, throttle=0)
+        self.assertEqual(p.pitch, 0.0)
+        self.assertTrue(p.on_ground)
+
+
+class CollisionTests(unittest.TestCase):
+    def _tree(self, world):
+        return next(o for o in world.nearby_objects((0, 0, 0))
+                    if o.hit and o.polys and len(o.polys) == 4 and o.radius < 30)
+
+    def test_wingtip_touching_a_tree_crashes(self):
+        w, p = World(), Plane()
+        tree = self._tree(w)
+        x, _, z = tree.center
+        p.yaw = p.pitch = p.roll = 0.0
+        tip = max(p.spec.hit_points, key=lambda q: q[0])          # right wingtip, plane-local
+        self.assertGreater(tip[0], 4.0)
+        p.pos = (x - tip[0], 6.0 - tip[1], z - tip[2])
+        self.assertTrue(w.hits_plane(p))
+        p.pos = (x - tip[0] - 40.0, 6.0, z - tip[2])               # well clear
+        self.assertFalse(w.hits_plane(p))
+
+    def test_fast_plane_cannot_skip_through_a_tree(self):
+        w, p = World(), Plane()
+        x, _, z = self._tree(w).center
+        p.set_spec(AIRCRAFT[2])
+        p.pos = (x, 5.0, z - 1.0)
+        prev = (x, 5.0, z - 5.0)
+        self.assertTrue(w.hits_plane(p, prev))
+
+    def test_open_air_is_clear(self):
+        self.assertFalse(World().hits_plane(Plane()))
+
+
+class ExplosionTests(unittest.TestCase):
+    def test_explosion_spawns_debris_burns_then_finishes(self):
+        import random
+        from sim.explosion import Explosion
+        ex = Explosion((0, 0, 0), (0, 0, 50), 1.0, random.Random(1))
+        self.assertGreater(len(ex.particles), 100)
+        self.assertTrue(all(p.pos[1] >= 0 for p in ex.particles))
+        for _ in range(60 * 40):
+            ex.update(1 / 60.0)
+        self.assertTrue(ex.done)
+        self.assertEqual(ex.particles, [])
+
+    def test_plane_breaks_into_pieces_that_land_and_stay(self):
+        import random
+        from sim.explosion import Explosion
+        p = Plane()
+        p.pos = (0.0, 30.0, 0.0)
+        polys = p.world_polys()
+        ex = Explosion(p.pos, (0, 0, 60), 1.0, random.Random(2), polys=polys, intensity=1.0)
+        self.assertGreaterEqual(len(ex.pieces), 8)
+        self.assertEqual(sum(len(pc.rel) for pc in ex.pieces), len(polys))   # nothing lost
+        for _ in range(60 * 15):
+            ex.update(1 / 60.0)
+        self.assertTrue(all(pc.resting for pc in ex.pieces))
+        for verts, _, _ in ex.wreckage_polys():
+            self.assertTrue(all(v[1] > -0.01 for v in verts))              # nothing under ground
+        self.assertGreater(len(ex.ground_decals()), 0)
+
+
+class FlameTests(unittest.TestCase):
+    def test_only_the_jet_has_a_flame_and_it_grows_with_throttle(self):
+        jet, trainer = AIRCRAFT[2], AIRCRAFT[0]
+        self.assertEqual(trainer.flame_polys(1.0, 0.0), [])
+        self.assertEqual(jet.flame_polys(0.1, 0.0), [])             # idle: no flame
+        def tail(throttle):
+            return min(v[2] for verts, _, _ in jet.flame_polys(throttle, 0.0) for v in verts)
+        self.assertLess(tail(1.0), tail(0.6) - 1.0)                  # longer plume at full power
+        self.assertLess(tail(0.6), -5.25)                            # extends behind the nozzle
+
+
+class SoundTests(unittest.TestCase):
+    def test_generated_waveforms(self):
+        import random
+        from sim import sound
+        boom = sound.make_boom(random.Random(1), seconds=1.0)
+        fire = sound.make_fire(random.Random(1), seconds=1.0)
+        self.assertEqual(len(boom), sound.RATE)
+        self.assertEqual(len(fire), sound.RATE)
+        loud = max(abs(x) for x in boom[:2000])
+        tail = max(abs(x) for x in boom[-500:])
+        self.assertGreater(loud, 10 * tail)                       # a bang that dies away
+        self.assertGreater(max(abs(x) for x in fire), 0.3)
+        jet = sound.make_jet(random.Random(1), seconds=1.0)
+        self.assertEqual(len(jet), sound.RATE)
+        self.assertGreater(max(abs(x) for x in jet), 0.3)
+
+    def test_only_the_jet_has_afterburner_power(self):
+        self.assertEqual(AIRCRAFT[0].exhaust_power(1.0), 0.0)
+        self.assertEqual(AIRCRAFT[2].exhaust_power(0.2), 0.0)
+        self.assertAlmostEqual(AIRCRAFT[2].exhaust_power(1.0), 1.0)
+
+
+class AircraftTests(unittest.TestCase):
+    def test_every_aircraft_flies_level_and_has_geometry(self):
+        for spec in AIRCRAFT:
+            p = Plane()
+            p.set_spec(spec)
+            p.reset()
+            fly(p, 2)
+            self.assertAlmostEqual(p.altitude, cfg.START_POSITION[1], delta=1.0, msg=spec.name)
+            self.assertGreater(len(p.world_polys()), 50, spec.name)
+
+    def test_jet_outruns_biplane(self):
+        speeds = {}
+        for spec in AIRCRAFT:
+            p = Plane()
+            p.set_spec(spec)
+            fly(p, 40, throttle=1)
+            speeds[spec.name] = p.speed
+        self.assertGreater(speeds["Falcon jet"], 2 * speeds["Barnstormer biplane"])
+
+    def test_switching_keeps_position(self):
+        p = Plane()
+        fly(p, 1)
+        pos = p.pos
+        p.set_spec(AIRCRAFT[2])
+        self.assertEqual(p.pos, pos)
 
 
 class CameraTests(unittest.TestCase):
