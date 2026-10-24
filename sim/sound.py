@@ -84,6 +84,20 @@ def make_thunk(rng, seconds=0.45):
     return out
 
 
+def make_snap(rng, seconds=0.8):
+    """A wing tearing off: a sharp crack, groaning metal and a rattle of falling parts."""
+    n = int(RATE * seconds)
+    out, hiss = [], 0.0
+    for i in range(n):
+        t = i / RATE
+        hiss += (rng.uniform(-1, 1) - hiss) * 0.4
+        crack = rng.uniform(-1, 1) * math.exp(-t / 0.02) * 1.5
+        groan = math.sin(2 * math.pi * (260 * t - 220 * t * t)) * math.exp(-t / 0.25) * 0.7
+        rattle = hiss * math.exp(-t / 0.3) * (0.6 if (i // 400) % 3 else 0.2)
+        out.append(crack + groan + rattle)
+    return out
+
+
 def make_gear_motor(rng, seconds=1.0):
     """Hydraulic whirr for the gear in motion: a low whine with pump pulses (loops seamlessly)."""
     n = int(RATE * seconds)
@@ -317,6 +331,12 @@ class Sounds:
         self._loop("wheel_roll", make_roll, min(speed / 45.0, 1.0) * 0.45 if rolling else 0.0, dt)
         squeal = rolling and braking and speed > 8.0
         self._loop("wheel_squeal", make_squeal, min(speed / 40.0, 1.0) * 0.18 if squeal else 0.0, dt, rate=12.0)
+
+    def wing_snap(self):
+        if self.ok and not self.muted:
+            snd = self._sound("wing_snap", make_snap)
+            snd.set_volume(0.9)
+            snd.play()
 
     def touchdown(self, sink_rate=1.0):
         """Thump and tyre chirp on a safe landing; a firmer landing is louder."""

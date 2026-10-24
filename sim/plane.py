@@ -20,6 +20,7 @@ class Plane:
     def set_spec(self, spec):
         """Swap aircraft type in flight, keeping position and attitude."""
         self.spec = spec
+        self.wing_lost = None             # a new aircraft has both wings
         self.speed = _clamp(self.speed, 0.0, spec.max_speed * 1.5)
         self.pitch = _clamp(self.pitch, -spec.max_pitch, spec.max_pitch)
         self.roll = _clamp(self.roll, -spec.max_roll, spec.max_roll)
@@ -36,6 +37,7 @@ class Plane:
         self.prop_angle = 0.0
         self.brake = 0.0
         self.on_ground = False
+        self.wing_lost = None       # None, "left" or "right"
         self.gear_down = False      # selected position
         self.gear = 0.0             # actual position: 0 up .. 1 down
         self._pitch_cmd = 0.0
@@ -100,9 +102,14 @@ class Plane:
         if self.on_ground:                    # the nose only lifts once there is enough airspeed
             self.pitch = max(self.pitch, 0.0) if self.speed >= sp.rotate_speed else 0.0
 
-        self.roll = _clamp(self.roll + self._roll_cmd * sp.roll_rate * authority * dt,
+        aileron = cfg.WING_LOSS_AILERON if self.wing_lost else 1.0
+        self.roll = _clamp(self.roll + self._roll_cmd * sp.roll_rate * authority * aileron * dt,
                            -sp.max_roll, sp.max_roll)
-        if roll_in == 0:                      # dihedral effect: wings level themselves
+        if self.wing_lost and not self.on_ground:
+            # Lift is lost on the broken side, so the plane keeps rolling and turning toward it.
+            side = -1.0 if self.wing_lost == "left" else 1.0
+            self.roll = _clamp(self.roll + side * cfg.WING_LOSS_ROLL * dt, -sp.max_roll, sp.max_roll)
+        elif roll_in == 0:                    # dihedral effect: wings level themselves
             self.roll -= self.roll * min(1.0, 0.35 * dt)
 
         if self.on_ground:                    # taxiing: steer with the nose wheel, wings stay level
@@ -143,20 +150,55 @@ class Plane:
             else:
                 y = sp.ground_clearance
 
+        if self.wing_lost and not self.on_ground:
+            y -= cfg.WING_LOSS_SINK * dt
+
         self.vertical_speed = (y - self.pos[1]) / dt if dt > 0 else 0.0
         self.pos = (x, y, z)
 
     def collision_points(self, pos=None):
-        """World positions of the points that stand for the plane's body (and wheels if down)."""
+        """(index, world position) of the points standing for the plane's body, and wheels if down.
+
+        Indices count the body points first, then the wheel points. Points on a wing that has
+        already broken off are skipped.
+        """
         fwd, right, up = self.basis
         px, py, pz = self.pos if pos is None else pos
-        local = self.spec.hit_points + (self.spec.gear_hit_points if self.gear > 0.5 else [])
-        return [(px + right[0] * x + up[0] * y + fwd[0] * z,
-                 py + right[1] * x + up[1] * y + fwd[1] * z,
-                 pz + right[2] * x + up[2] * y + fwd[2] * z) for x, y, z in local]
+        sp = self.spec
+        local = list(enumerate(sp.hit_points))
+        if self.gear > 0.5:
+            local += [(len(sp.hit_points) + i, p) for i, p in enumerate(sp.gear_hit_points)]
+        out = []
+        for i, (x, y, z) in local:
+            if self.wing_lost and i < len(sp.hit_points) and sp.is_wing_point((x, y, z)) \
+                    and sp.wing_side((x, y, z)) == self.wing_lost:
+                continue
+            out.append((i, (px + right[0] * x + up[0] * y + fwd[0] * z,
+                            py + right[1] * x + up[1] * y + fwd[1] * z,
+                            pz + right[2] * x + up[2] * y + fwd[2] * z)))
+        return out
 
-    def world_polys(self, flame=True):
-        """The plane's mesh transformed into world space."""
+    def collision_result(self, indices):
+        """What hitting something with these collision points means.
+
+        Returns "crash", or ("wing", side) if only one wing's outer part touched and that wing is
+        still on. Touching anything but a wing, or losing the second wing, is a crash.
+        """
+        sp, sides = self.spec, set()
+        for i in indices:
+            if i >= len(sp.hit_points) or not sp.is_wing_point(sp.hit_points[i]):
+                return "crash"
+            sides.add(sp.wing_side(sp.hit_points[i]))
+        if len(sides) != 1 or self.wing_lost:
+            return "crash"
+        return ("wing", sides.pop())
+
+    def lose_wing(self, side):
+        """Break the wing off. Returns its polygons in world space (to fall away as wreckage)."""
+        self.wing_lost = side
+        return self._to_world(self.spec.lost_wing_polys[side])
+
+    def _to_world(self, polys):
         fwd, right, up = self.basis
         px, py, pz = self.pos
 
@@ -165,15 +207,17 @@ class Plane:
                     py + right[1] * p[0] + up[1] * p[1] + fwd[1] * p[2],
                     pz + right[2] * p[0] + up[2] * p[1] + fwd[2] * p[2])
 
-        out = []
-        mesh = self.spec.mesh + (self.spec.gear_mesh if self.gear > 0.5 else [])
+        return [([to_world(v) for v in verts], color,
+                 None if n is None else
+                 (right[0] * n[0] + up[0] * n[1] + fwd[0] * n[2],
+                  right[1] * n[0] + up[1] * n[1] + fwd[1] * n[2],
+                  right[2] * n[0] + up[2] * n[1] + fwd[2] * n[2])) for verts, color, n in polys]
+
+    def world_polys(self, flame=True):
+        """The plane's mesh transformed into world space."""
+        body, gear = self.spec.parts(self.wing_lost)
+        mesh = body + (gear if self.gear > 0.5 else [])
         mesh = mesh + self.spec.prop_polys(self.prop_angle)
         if flame:
             mesh = mesh + self.spec.flame_polys(self.throttle, self.prop_angle)
-        for verts, color, n in mesh:
-            out.append(([to_world(v) for v in verts], color,
-                        None if n is None else
-                        (right[0] * n[0] + up[0] * n[1] + fwd[0] * n[2],
-                         right[1] * n[0] + up[1] * n[1] + fwd[1] * n[2],
-                         right[2] * n[0] + up[2] * n[1] + fwd[2] * n[2])))
-        return out
+        return self._to_world(mesh)

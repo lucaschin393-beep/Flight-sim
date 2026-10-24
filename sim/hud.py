@@ -85,6 +85,10 @@ class Hud:
         elif not plane.on_ground and plane.altitude < 150 and plane.speed < plane.spec.land_speed * 1.8:
             self._text(surface, self.font, "LANDING GEAR UP - press G", (16, self.h - 168), WARN)
 
+        if plane.wing_lost:
+            self._text(surface, self.big, "%s WING LOST!" % plane.wing_lost.upper(),
+                       (self.w // 2, 140), (255, 90, 80), "midtop")
+
         if plane.stalled:
             self._text(surface, self.big, "STALL - nose down!", (self.w // 2, 90),
                        (255, 190, 60), "midtop")

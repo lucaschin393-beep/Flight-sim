@@ -50,10 +50,10 @@ def _cluster(polys, count, rng):
     return groups
 
 
-class _Piece:
+class Piece:
     """A chunk of the broken plane: a rigid group of polygons that tumbles and lands."""
 
-    def __init__(self, polys, origin, velocity, rng, intensity, inherit):
+    def __init__(self, polys, origin, velocity, rng, intensity, inherit, drag=0.0, burn=True):
         verts = [v for p in polys for v in p[0]]
         self.center = tuple(sum(v[i] for v in verts) / len(verts) for i in range(3))
         self.rel = [([tuple(v[i] - self.center[i] for i in range(3)) for v in p[0]], p[1], p[2])
@@ -66,7 +66,8 @@ class _Piece:
         self.spin = tuple(rng.uniform(-1, 1) * rng.uniform(1.5, 6.0) * intensity for _ in range(3))
         self.rot = [[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0]]
         self.bounces, self.resting, self.age = 0, False, 0.0
-        self.burning = rng.random() < 0.5
+        self.burning = burn and rng.random() < 0.5
+        self.drag, self.burn = drag, burn
 
     def update(self, dt):
         self.age += dt
@@ -74,6 +75,9 @@ class _Piece:
             return
         vx, vy, vz = self.vel
         vy -= 24.0 * dt
+        if self.drag:                                                  # air slows a light, flat wing
+            damp = max(0.0, 1.0 - self.drag * dt)
+            vx, vz = vx * damp, vz * damp
         cx, cy, cz = self.center
         self.center = (cx + vx * dt, cy + vy * dt, cz + vz * dt)
         self.vel = (vx, vy, vz)
@@ -93,7 +97,8 @@ class _Piece:
                 self.spin = tuple(c * 0.5 for c in self.spin)
 
     def polys(self):
-        soot = min(self.age / 4.0, 1.0) * 0.8                          # fire chars the paint
+        # fire chars the paint (a wing that just broke off isn't burning)
+        soot = min(self.age / 4.0, 1.0) * 0.8 if self.burn else 0.0
         out = []
         for verts, color, normal in self.rel:
             col = tuple(int(c * (1 - soot) + 34 * soot) for c in color)
@@ -131,7 +136,7 @@ class Explosion:
         if polys:
             for group in _cluster(polys, 16, self.rng):
                 if group:
-                    self.pieces.append(_Piece(group, self.pos, velocity, self.rng, intensity, 0.45))
+                    self.pieces.append(Piece(group, self.pos, velocity, self.rng, intensity, 0.45))
         blob = [self.rng.uniform(0.7, 1.3) for _ in range(14)]         # irregular scorch outline
         self._scorch = [(math.cos(2 * math.pi * i / 14) * r, math.sin(2 * math.pi * i / 14) * r)
                         for i, r in enumerate(blob)]

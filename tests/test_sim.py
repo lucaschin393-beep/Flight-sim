@@ -178,6 +178,63 @@ class CollisionTests(unittest.TestCase):
         self.assertFalse(World().hits_plane(Plane()))
 
 
+class WingLossTests(unittest.TestCase):
+    def _plane(self):
+        p = Plane()
+        p.yaw = p.pitch = p.roll = 0.0
+        return p
+
+    def test_wing_points_are_classified_by_side(self):
+        sp = AIRCRAFT[0]
+        wing = [i for i, q in enumerate(sp.hit_points) if sp.is_wing_point(q)]
+        self.assertTrue(wing)
+        self.assertEqual({sp.wing_side(sp.hit_points[i]) for i in wing}, {"left", "right"})
+        p = self._plane()
+        right = [i for i in wing if sp.wing_side(sp.hit_points[i]) == "right"]
+        left = [i for i in wing if sp.wing_side(sp.hit_points[i]) == "left"]
+        self.assertEqual(p.collision_result(right), ("wing", "right"))
+        self.assertEqual(p.collision_result(left + right), "crash")             # both wings at once
+        fuselage = next(i for i, q in enumerate(sp.hit_points) if not sp.is_wing_point(q))
+        self.assertEqual(p.collision_result([fuselage]), "crash")
+        self.assertEqual(p.collision_result(right + [fuselage]), "crash")
+
+    def test_wing_comes_off_then_second_wing_or_repeat_is_a_crash(self):
+        sp = AIRCRAFT[0]
+        p = self._plane()
+        before = len(p.world_polys())
+        gone = p.lose_wing("left")
+        self.assertGreater(len(gone), 5)
+        self.assertEqual(len(p.world_polys()), before - len(gone))
+        self.assertTrue(all(v[0] < 0 for verts, _, _ in gone for v in verts[:1]))   # left of the plane
+        left = [i for i, q in enumerate(sp.hit_points) if sp.is_wing_point(q) and sp.wing_side(q) == "left"]
+        live = {i for i, _ in p.collision_points()}
+        self.assertFalse(set(left) & live)                       # the missing wing can't hit anything
+        right = [i for i, q in enumerate(sp.hit_points) if sp.is_wing_point(q) and sp.wing_side(q) == "right"]
+        self.assertEqual(p.collision_result(right), "crash")     # losing the other one is fatal
+
+    def test_plane_keeps_turning_toward_the_missing_wing(self):
+        for side, sign in (("left", -1), ("right", 1)):
+            p = self._plane()
+            p.lose_wing(side)
+            start = p.yaw
+            fly(p, 4)                                             # hands off
+            self.assertGreater(p.roll * sign, 0.8, side)
+            self.assertGreater((p.yaw - start) * sign, 0.3, side)
+            self.assertGreater(p.speed, 0)                        # still flying
+
+    def test_a_clipped_wingtip_in_the_world_breaks_the_wing(self):
+        w, p = World(), self._plane()
+        tree = next(o for o in w.nearby_objects((0, 0, 0))
+                    if o.hit and o.polys and len(o.polys) == 4 and o.radius < 30)
+        sp = p.spec
+        tip = max(sp.hit_points, key=lambda q: q[0])
+        x, _, z = tree.center
+        p.pos = (x - tip[0], 6.0 - tip[1], z - tip[2])
+        hits = w.hit_indices(p)
+        self.assertTrue(hits)
+        self.assertEqual(p.collision_result(hits), ("wing", "right"))
+
+
 class ExplosionTests(unittest.TestCase):
     def test_explosion_spawns_debris_burns_then_finishes(self):
         import random

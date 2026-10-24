@@ -1,4 +1,5 @@
 """Airplane simulator: fly with W/A/S/D, switch 1st/3rd person with P."""
+import random
 import sys
 
 import pygame
@@ -6,7 +7,7 @@ import pygame
 from sim import config as cfg
 from sim.aircraft import AIRCRAFT
 from sim.camera import FIRST_PERSON, VIEWS, Camera
-from sim.explosion import LINGER, SMOULDER, Explosion
+from sim.explosion import LINGER, SMOULDER, Explosion, Piece
 from sim.hud import Hud
 from sim.sound import Sounds
 from sim.plane import Plane
@@ -38,6 +39,7 @@ def main():
     view_index, status, paused = 0, None, False
     sounds = Sounds()
     explosion = None
+    wing_pieces = []          # broken-off wings tumbling to the ground
     landed_at = None          # (position, heading) of the last safe landing
 
     while True:
@@ -77,6 +79,7 @@ def main():
                     camera.snap_next_update()
                     status = None
                     explosion = None
+                    wing_pieces = []
                     sounds.stop()
                     paused = False
 
@@ -89,7 +92,18 @@ def main():
             prev_pos = plane.pos
             plane.update(dt, pitch_in, roll_in, throttle_in, keys[pygame.K_b])
 
-            if world.hits_plane(plane, prev_pos):
+            hits = world.hit_indices(plane, prev_pos)
+            outcome = plane.collision_result(hits) if hits else None
+            if outcome and outcome != "crash":                 # clipped a wing: it breaks off
+                side = outcome[1]
+                velocity = tuple(c * plane.speed for c in plane.basis[0])
+                broken = Piece(plane.lose_wing(side), plane.pos, velocity, random.Random(), 0.35,
+                               0.9, drag=1.0, burn=False)
+                broken.spin = tuple(c * 2.0 for c in broken.spin)
+                wing_pieces.append(broken)
+                sounds.wing_snap()
+                outcome = None
+            if outcome == "crash":
                 status = ("CRASHED!", (255, 90, 80))
             elif not plane.on_ground and plane.altitude <= plane.spec.ground_clearance:
                 status = landing_status(plane)
@@ -106,6 +120,9 @@ def main():
             sounds.crash(plane.speed / 60.0)
             view_index = 0                    # watch it from outside, in 3rd person
             camera.snap_next_update()
+        if not paused:
+            for piece in wing_pieces:
+                piece.update(dt)
         if explosion and not paused:
             explosion.update(dt)
             # fire roars while the wreck burns hard, then dies down as it smoulders
@@ -127,7 +144,8 @@ def main():
         renderer.render(screen, camera, world, plane, draw_plane=(view != FIRST_PERSON),
                         wrecked=explosion is not None,
                         extra_decals=explosion.ground_decals() if explosion else (),
-                        extra_polys=explosion.wreckage_polys() if explosion else ())
+                        extra_polys=(explosion.wreckage_polys() if explosion else [])
+                        + [poly for piece in wing_pieces for poly in piece.polys()])
         camera.pos = true_pos
         if explosion:
             explosion.draw(screen, camera)

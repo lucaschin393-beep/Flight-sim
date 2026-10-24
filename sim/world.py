@@ -114,14 +114,15 @@ class World:
                 return True
         return False
 
-    def hits_plane(self, plane, prev_pos=None):
-        """True if any sampled point of the plane is inside a mountain, building or tree.
+    def hit_indices(self, plane, prev_pos=None):
+        """Indices (see Plane.collision_points) of plane points inside a mountain, building or tree.
 
         Also tests halfway along the last step so fast planes can't skip through thin trees.
         """
         reach = plane.spec.bounding_radius
         spots = [plane.pos] if prev_pos is None else [
             tuple((a + b) / 2.0 for a, b in zip(prev_pos, plane.pos)), plane.pos]
+        hits = set()
         for spot in spots:
             points = None
             for obj in self.nearby_objects(spot):
@@ -129,6 +130,8 @@ class World:
                     continue
                 if points is None:
                     points = plane.collision_points(spot)
-                if any(obj.hit(p) for p in points):
-                    return True
-        return False
+                hits.update(i for i, p in points if obj.hit(p))
+        return hits
+
+    def hits_plane(self, plane, prev_pos=None):
+        return bool(self.hit_indices(plane, prev_pos))

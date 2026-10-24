@@ -25,13 +25,14 @@ class Aircraft:
 
     def __init__(self, name, mesh, propeller=None, *, min_speed, max_speed, stall_speed, drag,
                  land_speed, ground_clearance=1.0, chase_distance=20.0, chase_height=6.0,
-                 eye=(0.9, 2.2), exhaust=None, engine="prop", pitch_rate=cfg.PITCH_RATE, roll_rate=cfg.ROLL_RATE,
+                 eye=(0.9, 2.2), exhaust=None, engine="prop", wing_zone=(1.6, -1.5, 1.3), pitch_rate=cfg.PITCH_RATE, roll_rate=cfg.ROLL_RATE,
                  control_speed=cfg.CONTROL_SPEED, bank_nose_drop=cfg.BANK_NOSE_DROP,
                  turn_factor=cfg.TURN_FACTOR, max_turn_rate=cfg.MAX_TURN_RATE,
                  max_pitch=cfg.MAX_PITCH, max_roll=cfg.MAX_ROLL):
         self.name, (self.mesh, self.gear_mesh), self.propeller = name, mesh, propeller
         self.min_speed, self.max_speed, self.stall_speed = min_speed, max_speed, stall_speed
         self.drag, self.land_speed = drag, land_speed
+        self.wing_zone = wing_zone    # (min |x|, min z, max z) of a wing in plane-local coordinates
         self.engine = engine          # key into sim.sound.ENGINES
         self.exhaust = exhaust        # (z, y, radius) of a jet nozzle that shows a flame
         self.ground_clearance = ground_clearance
@@ -47,12 +48,40 @@ class Aircraft:
         spinning = self.prop_polys(0.0) + self.prop_polys(math.pi / 2)
         self.hit_points = _sample_points(self.mesh + spinning, 40)
         self.gear_hit_points = _sample_points(self.gear_mesh, 12)
+        # The same meshes with one wing (and anything bolted to it) removed, for a broken-off wing.
+        self._variants = {None: (self.mesh, self.gear_mesh)}
+        self.lost_wing_polys = {}
+        for side in ("left", "right"):
+            keep_m, gone_m = self._split_wing(self.mesh, side)
+            keep_g, gone_g = self._split_wing(self.gear_mesh, side)
+            self._variants[side] = (keep_m, keep_g)
+            self.lost_wing_polys[side] = gone_m + gone_g
         self.bounding_radius = max(math.hypot(*p) for p in self.hit_points + self.gear_hit_points)
 
     @property
     def rotate_speed(self):
         """Speed at which the nose can be raised to leave the ground."""
         return self.stall_speed * 1.1
+
+    def is_wing_point(self, p):
+        """Whether a plane-local point lies on a wing (and not on the fuselage or tail)."""
+        x_min, z_min, z_max = self.wing_zone
+        return abs(p[0]) >= x_min and z_min <= p[2] <= z_max
+
+    def wing_side(self, p):
+        return "right" if p[0] > 0 else "left"
+
+    def _split_wing(self, polys, side):
+        keep, gone = [], []
+        for poly in polys:
+            c = tuple(sum(v[i] for v in poly[0]) / len(poly[0]) for i in range(3))
+            on_wing = self.is_wing_point(c) and self.wing_side(c) == side
+            (gone if on_wing else keep).append(poly)
+        return keep, gone
+
+    def parts(self, lost_wing=None):
+        """(body mesh, gear mesh), without the lost wing if there is one."""
+        return self._variants[lost_wing]
 
     def exhaust_power(self, throttle):
         """0..1 strength of the afterburner (flame and roar); 0 for aircraft without one."""
@@ -70,16 +99,16 @@ AIRCRAFT = [
              min_speed=cfg.MIN_SPEED, max_speed=cfg.MAX_SPEED, stall_speed=cfg.STALL_SPEED,
              drag=cfg.DRAG, land_speed=55.0),
     Aircraft("Barnstormer biplane", meshes.biplane_mesh(), partial(meshes.propeller, z=3.4, length=1.1),
-             engine="radial",
+             engine="radial", wing_zone=(1.3, -1.3, 1.2),
              min_speed=22.0, max_speed=70.0, stall_speed=18.0, drag=0.0007, land_speed=40.0,
              eye=(1.0, 1.2), pitch_rate=1.0, roll_rate=2.0, control_speed=40.0,
              turn_factor=2.4, max_turn_rate=1.1),
     Aircraft("Falcon jet", meshes.jet_mesh(),
              min_speed=45.0, max_speed=220.0, stall_speed=40.0, drag=0.00025, land_speed=70.0,
-             exhaust=(-5.25, 0.05, 0.42), engine="jet", ground_clearance=1.2, chase_distance=28.0, chase_height=7.0, eye=(0.9, 2.6),
+             exhaust=(-5.25, 0.05, 0.42), engine="jet", wing_zone=(1.4, -3.6, 0.7), ground_clearance=1.2, chase_distance=28.0, chase_height=7.0, eye=(0.9, 2.6),
              pitch_rate=1.0, roll_rate=3.0, control_speed=90.0, turn_factor=1.8,
              max_turn_rate=1.0, max_roll=1.5),
-    Aircraft("Atlas airliner", meshes.airliner_mesh(), engine="airliner",
+    Aircraft("Atlas airliner", meshes.airliner_mesh(), engine="airliner", wing_zone=(3.0, -8.5, 3.6),
              min_speed=50.0, max_speed=140.0, stall_speed=40.0, drag=0.0003, land_speed=62.0,
              ground_clearance=3.4, chase_distance=60.0, chase_height=16.0, eye=(2.2, 14.0),
              pitch_rate=0.45, roll_rate=0.7, control_speed=80.0, bank_nose_drop=0.3,

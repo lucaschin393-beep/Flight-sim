@@ -63,8 +63,10 @@ Switching mid-flight keeps your position and attitude (not available after a cra
   Ground speed is capped at 300 km/h.
   Crashing or restarting mid-flight sends you back to the start.
 - Touch down gently, on the runway or anywhere else on open ground (level wings, low speed, slow descent) to **land**.
-  Hitting the ground too fast or unlevel, or touching a mountain, building or tree with *any* part of the plane (wingtip,
-  tail, propeller, wheels) is a **crash**: the plane blows apart (the view switches to 3rd person).
+  Hitting the ground too fast or unlevel, or touching a mountain, building or tree with the body, tail, propeller or wheels is a
+  **crash**. Clipping with just a **wing** snaps that wing off instead: it tumbles away, you keep
+  flying, but the plane rolls and turns toward the missing side and sinks, and aileron input
+  only partly cancels it. Losing the second wing, or hitting anything else, is a crash: the plane blows apart (the view switches to 3rd person).
   The wreck breaks into tumbling pieces that land, char and smoulder beside a scorch mark;
   the blast is bigger the faster you hit, and the camera shakes, and you hear a boom followed by crackling fire that dies down.
 
