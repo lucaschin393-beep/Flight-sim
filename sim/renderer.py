@@ -1,0 +1,171 @@
+"""Software 3D renderer: perspective projection + painter's algorithm."""
+import math
+
+import pygame
+
+from . import config as cfg
+from .vec import dot, normalize, sub
+from .world import runway_polys
+
+NEAR = 0.5
+LIGHT = normalize((0.4, 0.8, -0.3))
+TILE = 400.0
+TILE_RADIUS = 7
+TILE_COLORS = ((98, 150, 92), (90, 140, 84))
+SHADOW_COLOR = (58, 92, 56)
+
+
+def clip_near(poly):
+    """Clip a camera-space polygon against the near plane (Sutherland-Hodgman)."""
+    out = []
+    n = len(poly)
+    for i in range(n):
+        a, b = poly[i], poly[(i + 1) % n]
+        a_in, b_in = a[2] >= NEAR, b[2] >= NEAR
+        if a_in:
+            out.append(a)
+        if a_in != b_in:
+            t = (NEAR - a[2]) / (b[2] - a[2])
+            out.append((a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, NEAR))
+    return out
+
+
+def clip_screen(pts, w, h):
+    """Clip a 2D polygon to the screen rectangle.
+
+    Keeps pygame from scan-converting enormous off-screen polygons (the
+    ground plane reaches millions of pixels when projected near the camera).
+    """
+    m = 2
+    for axis, bound, keep_less in ((0, -m, False), (0, w + m, True),
+                                   (1, -m, False), (1, h + m, True)):
+        out = []
+        n = len(pts)
+        for i in range(n):
+            a, b = pts[i], pts[(i + 1) % n]
+            a_in = (a[axis] <= bound) if keep_less else (a[axis] >= bound)
+            b_in = (b[axis] <= bound) if keep_less else (b[axis] >= bound)
+            if a_in:
+                out.append(a)
+            if a_in != b_in:
+                t = (bound - a[axis]) / (b[axis] - a[axis])
+                out.append((a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t))
+        pts = out
+        if not pts:
+            break
+    return pts
+
+
+def apply_fog(color, depth):
+    t = (depth - cfg.FOG_START) / (cfg.FOG_END - cfg.FOG_START)
+    if t <= 0:
+        return color
+    t = min(t, 1.0)
+    return tuple(int(c + (f - c) * t) for c, f in zip(color, cfg.FOG_COLOR))
+
+
+def shade(color, normal):
+    k = 0.45 + 0.55 * max(0.0, dot(normal, LIGHT))
+    return (int(color[0] * k), int(color[1] * k), int(color[2] * k))
+
+
+class Renderer:
+    def __init__(self, width, height):
+        self.w, self.h = width, height
+        self.sky = self._make_sky()
+        self.runway = runway_polys()
+
+    def _make_sky(self):
+        surf = pygame.Surface((self.w, self.h))
+        horizon = self.h // 2
+        for y in range(self.h):
+            t = min(1.0, y / float(horizon))
+            color = tuple(int(a + (b - a) * t) for a, b in zip(cfg.SKY_TOP, cfg.SKY_HORIZON))
+            pygame.draw.line(surf, color, (0, y), (self.w, y))
+        return surf
+
+    # -- polygon pipeline ------------------------------------------------
+    def _project(self, cam, verts):
+        """World polygon -> (mean depth, screen points) or None if not visible."""
+        pc = clip_near([cam.to_camera(v) for v in verts])
+        if len(pc) < 3:
+            return None
+        pts = [cam.project(p) for p in pc]
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        if max(xs) < 0 or min(xs) > self.w or max(ys) < 0 or min(ys) > self.h:
+            return None
+        pts = clip_screen(pts, self.w, self.h)
+        if len(pts) < 3:
+            return None
+        return sum(p[2] for p in pc) / len(pc), pts
+
+    def _items(self, cam, polys, lit):
+        items = []
+        for poly in polys:
+            r = self._project(cam, poly[0])
+            if r is None or r[0] > cfg.FOG_END:
+                continue
+            color = shade(poly[1], poly[2]) if lit else poly[1]
+            items.append((r[0], apply_fog(color, r[0]), r[1]))
+        return items
+
+    @staticmethod
+    def _paint(surface, items, sort=True):
+        if sort:
+            items.sort(key=lambda it: -it[0])
+        for _, color, pts in items:
+            pygame.draw.polygon(surface, color, pts)
+
+    # -- scene -----------------------------------------------------------
+    def _ground(self, surface, cam):
+        px, pz = cam.pos[0], cam.pos[2]
+        big = 60000.0
+        base = [(px - big, 0, pz - big), (px + big, 0, pz - big),
+                (px + big, 0, pz + big), (px - big, 0, pz + big)]
+        self._paint(surface, self._items(cam, [(base, cfg.GROUND_FAR, None)], False))
+
+        ix, iz = int(math.floor(px / TILE)), int(math.floor(pz / TILE))
+        tiles = []
+        for dx in range(-TILE_RADIUS, TILE_RADIUS + 1):
+            for dz in range(-TILE_RADIUS, TILE_RADIUS + 1):
+                x0, z0 = (ix + dx) * TILE, (iz + dz) * TILE
+                center = (x0 + TILE / 2, 0, z0 + TILE / 2)
+                d = sub(center, cam.pos)
+                if dot(d, cam.fwd) < -TILE:        # behind the camera
+                    continue
+                color = TILE_COLORS[(ix + dx + iz + dz) & 1]
+                tiles.append(([(x0, 0, z0), (x0 + TILE, 0, z0), (x0 + TILE, 0, z0 + TILE),
+                               (x0, 0, z0 + TILE)], color, None))
+        self._paint(surface, self._items(cam, tiles, False))
+
+    def _shadow(self, plane):
+        fwd_x, fwd_z = math.sin(plane.yaw), math.cos(plane.yaw)
+        rx, rz = fwd_z, -fwd_x
+        px, pz = plane.pos[0], plane.pos[2]
+        pts = []
+        for a, b in ((-5.5, -3.5), (5.5, -3.5), (5.5, 3.5), (-5.5, 3.5)):
+            pts.append((px + rx * a + fwd_x * b, 0.15, pz + rz * a + fwd_z * b))
+        return [(pts, SHADOW_COLOR, None)]
+
+    def render(self, surface, cam, world, plane, draw_plane):
+        surface.blit(self.sky, (0, 0))
+        self._ground(surface, cam)
+
+        decals = list(self.runway)
+        decals = [(v, c, None) for v, c in decals]
+        if plane.altitude < 700:
+            decals += self._shadow(plane)
+        self._paint(surface, self._items(cam, decals, False), sort=False)
+
+        items = []
+        for obj in world.nearby_objects(cam.pos):
+            d = sub(obj.center, cam.pos)
+            if dot(d, cam.fwd) < -obj.radius:
+                continue
+            if dot(d, d) > (cfg.FOG_END + obj.radius) ** 2:
+                continue
+            items += self._items(cam, obj.polys, True)
+        if draw_plane:
+            items += self._items(cam, plane.world_polys(), True)
+        self._paint(surface, items)
