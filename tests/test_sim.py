@@ -234,6 +234,32 @@ class SoundTests(unittest.TestCase):
         self.assertEqual(len(jet), sound.RATE)
         self.assertGreater(max(abs(x) for x in jet), 0.3)
 
+    def test_every_aircraft_has_an_engine_sound_with_seamless_loops(self):
+        import random
+        from sim import sound
+        for spec in AIRCRAFT:
+            prof = sound.ENGINES[spec.engine]
+            self.assertEqual(len(prof["layers"]), 3, spec.name)
+            for params in prof["layers"]:
+                loop = sound.make_engine_layer(random.Random(1), prof["kind"], params)
+                self.assertEqual(len(loop), sound.RATE)
+                step = max(abs(loop[i + 1] - loop[i]) for i in range(0, 2000))
+                self.assertLess(abs(loop[0] - loop[-1]), 3 * max(step, 0.05), spec.name)  # no seam click
+                self.assertGreater(max(abs(x) for x in loop), 0.1)
+
+    def test_gear_and_wheel_effects_exist(self):
+        import random
+        from sim import sound
+        for make in (sound.make_thunk, sound.make_gear_motor, sound.make_roll,
+                     sound.make_squeal, sound.make_touchdown):
+            wave = make(random.Random(1))
+            self.assertGreater(len(wave), 1000, make.__name__)
+            self.assertGreater(max(abs(x) for x in wave), 0.1, make.__name__)
+        for make in (sound.make_gear_motor, sound.make_roll, sound.make_squeal):   # loops
+            wave = make(random.Random(1))
+            self.assertEqual(len(wave), sound.RATE)
+            self.assertLess(abs(wave[0] - wave[-1]), 0.5, make.__name__)
+
     def test_only_the_jet_has_afterburner_power(self):
         self.assertEqual(AIRCRAFT[0].exhaust_power(1.0), 0.0)
         self.assertEqual(AIRCRAFT[2].exhaust_power(0.2), 0.0)

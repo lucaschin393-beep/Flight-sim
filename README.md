@@ -42,6 +42,8 @@ Prefer `W` = climb? Set `INVERT_PITCH = True` in `sim/config.py`.
 | `3` | Falcon jet | Very fast, snappy roll, high landing speed; afterburner flame and roar |
 | `4` | Atlas airliner | Big, heavy, sluggish; needs wide turns and gentle inputs |
 
+Each aircraft has its own engine sound (buzzy prop, lumpy radial, turbine whine, airliner rumble) whose pitch and loudness follow the throttle. You also hear the gear's hydraulic whirr and a clunk as it locks, tyre rumble while rolling, a squeal under hard braking, and a thump and chirp on touchdown.
+
 Switching mid-flight keeps your position and attitude (not available after a crash or landing).
 
 ## Flying tips
@@ -77,7 +79,7 @@ sim/camera.py      1st-person and chase cameras, projection
 sim/world.py       runway and chunked procedural world with collisions
 sim/renderer.py    projection, near/screen clipping, fog, painter's algorithm
 sim/meshes.py      box / cone / airplane shape builders
-sim/sound.py      generated crash, fire and afterburner sounds (no audio files)
+sim/sound.py      generated engine, crash, fire and afterburner sounds (no audio files)
 sim/explosion.py  crash: fireball, tumbling wreckage, scorch mark, smoke
 sim/hud.py         flight data, throttle bar, cockpit frame
 tests/             logic tests (no display needed)

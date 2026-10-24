@@ -96,6 +96,7 @@ def main():
                 if not status[0].startswith("CRASHED"):
                     plane.pos = (plane.pos[0], plane.spec.ground_clearance, plane.pos[2])
                     landed_at = (plane.pos, plane.yaw)
+                    sounds.touchdown(-plane.vertical_speed)
 
         if explosion is None and status and status[0].startswith("CRASHED"):
             fwd = plane.basis[0]
@@ -113,6 +114,9 @@ def main():
             sounds.fire_level(ramp_in * (0.25 + 0.75 * burn_down))
 
         quiet = paused or status is not None
+        sounds.engine(plane.spec.engine, plane.throttle, dt, quiet)
+        sounds.gear(plane.gear, dt, quiet)
+        sounds.wheels(plane.on_ground, plane.speed, pygame.key.get_pressed()[pygame.K_b], dt, quiet)
         sounds.afterburner(0.0 if quiet else plane.spec.exhaust_power(plane.throttle), dt)
 
         view = VIEWS[view_index]

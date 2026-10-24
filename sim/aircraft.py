@@ -25,13 +25,14 @@ class Aircraft:
 
     def __init__(self, name, mesh, propeller=None, *, min_speed, max_speed, stall_speed, drag,
                  land_speed, ground_clearance=1.0, chase_distance=20.0, chase_height=6.0,
-                 eye=(0.9, 2.2), exhaust=None, pitch_rate=cfg.PITCH_RATE, roll_rate=cfg.ROLL_RATE,
+                 eye=(0.9, 2.2), exhaust=None, engine="prop", pitch_rate=cfg.PITCH_RATE, roll_rate=cfg.ROLL_RATE,
                  control_speed=cfg.CONTROL_SPEED, bank_nose_drop=cfg.BANK_NOSE_DROP,
                  turn_factor=cfg.TURN_FACTOR, max_turn_rate=cfg.MAX_TURN_RATE,
                  max_pitch=cfg.MAX_PITCH, max_roll=cfg.MAX_ROLL):
         self.name, (self.mesh, self.gear_mesh), self.propeller = name, mesh, propeller
         self.min_speed, self.max_speed, self.stall_speed = min_speed, max_speed, stall_speed
         self.drag, self.land_speed = drag, land_speed
+        self.engine = engine          # key into sim.sound.ENGINES
         self.exhaust = exhaust        # (z, y, radius) of a jet nozzle that shows a flame
         self.ground_clearance = ground_clearance
         self.chase_distance, self.chase_height, self.eye = chase_distance, chase_height, eye
@@ -69,15 +70,16 @@ AIRCRAFT = [
              min_speed=cfg.MIN_SPEED, max_speed=cfg.MAX_SPEED, stall_speed=cfg.STALL_SPEED,
              drag=cfg.DRAG, land_speed=55.0),
     Aircraft("Barnstormer biplane", meshes.biplane_mesh(), partial(meshes.propeller, z=3.4, length=1.1),
+             engine="radial",
              min_speed=22.0, max_speed=70.0, stall_speed=18.0, drag=0.0007, land_speed=40.0,
              eye=(1.0, 1.2), pitch_rate=1.0, roll_rate=2.0, control_speed=40.0,
              turn_factor=2.4, max_turn_rate=1.1),
     Aircraft("Falcon jet", meshes.jet_mesh(),
              min_speed=45.0, max_speed=220.0, stall_speed=40.0, drag=0.00025, land_speed=70.0,
-             exhaust=(-5.25, 0.05, 0.42), ground_clearance=1.2, chase_distance=28.0, chase_height=7.0, eye=(0.9, 2.6),
+             exhaust=(-5.25, 0.05, 0.42), engine="jet", ground_clearance=1.2, chase_distance=28.0, chase_height=7.0, eye=(0.9, 2.6),
              pitch_rate=1.0, roll_rate=3.0, control_speed=90.0, turn_factor=1.8,
              max_turn_rate=1.0, max_roll=1.5),
-    Aircraft("Atlas airliner", meshes.airliner_mesh(),
+    Aircraft("Atlas airliner", meshes.airliner_mesh(), engine="airliner",
              min_speed=50.0, max_speed=140.0, stall_speed=40.0, drag=0.0003, land_speed=62.0,
              ground_clearance=3.4, chase_distance=60.0, chase_height=16.0, eye=(2.2, 14.0),
              pitch_rate=0.45, roll_rate=0.7, control_speed=80.0, bank_nose_drop=0.3,
