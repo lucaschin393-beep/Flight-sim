@@ -304,20 +304,24 @@ class SoundTests(unittest.TestCase):
                 self.assertLess(abs(loop[0] - loop[-1]), 3 * max(step, 0.05), spec.name)  # no seam click
                 self.assertGreater(max(abs(x) for x in loop), 0.1)
 
-    def test_airliner_engine_has_no_whine(self):
+    def test_no_engine_has_a_whine(self):
         from sim import sound
-        self.assertTrue(all(layer["whine"] == 0 for layer in sound.ENGINES["airliner"]["layers"]))
-        self.assertTrue(all(layer["whine"] > 0 for layer in sound.ENGINES["jet"]["layers"]))
+        for name, prof in sound.ENGINES.items():
+            if prof["kind"] == "turbine":
+                self.assertTrue(all(layer["whine"] == 0 for layer in prof["layers"]), name)
+        self.assertFalse(hasattr(sound, "make_squeal"))
+        for method in ("wing_snap", "touchdown", "gear", "wheels", "crash", "engine", "afterburner"):
+            self.assertTrue(hasattr(sound.Sounds, method), method)       # nothing lost in edits
 
     def test_gear_and_wheel_effects_exist(self):
         import random
         from sim import sound
         for make in (sound.make_thunk, sound.make_gear_motor, sound.make_roll,
-                     sound.make_squeal, sound.make_touchdown):
+                     sound.make_touchdown, sound.make_snap):
             wave = make(random.Random(1))
             self.assertGreater(len(wave), 1000, make.__name__)
             self.assertGreater(max(abs(x) for x in wave), 0.1, make.__name__)
-        for make in (sound.make_gear_motor, sound.make_roll, sound.make_squeal):   # loops
+        for make in (sound.make_gear_motor, sound.make_roll):   # loops
             wave = make(random.Random(1))
             self.assertEqual(len(wave), sound.RATE)
             self.assertLess(abs(wave[0] - wave[-1]), 0.5, make.__name__)

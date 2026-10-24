@@ -85,30 +85,30 @@ def make_thunk(rng, seconds=0.45):
 
 
 def make_snap(rng, seconds=0.8):
-    """A wing tearing off: a sharp crack, groaning metal and a rattle of falling parts."""
+    """A wing tearing off: a sharp crack and a rattle of falling parts."""
     n = int(RATE * seconds)
     out, hiss = [], 0.0
     for i in range(n):
         t = i / RATE
         hiss += (rng.uniform(-1, 1) - hiss) * 0.4
         crack = rng.uniform(-1, 1) * math.exp(-t / 0.02) * 1.5
-        groan = math.sin(2 * math.pi * (260 * t - 220 * t * t)) * math.exp(-t / 0.25) * 0.7
         rattle = hiss * math.exp(-t / 0.3) * (0.6 if (i // 400) % 3 else 0.2)
-        out.append(crack + groan + rattle)
+        out.append(crack + rattle)
     return out
 
 
 def make_gear_motor(rng, seconds=1.0):
-    """Hydraulic whirr for the gear in motion: a low whine with pump pulses (loops seamlessly)."""
+    """Gear in motion: a low mechanical grind with pump pulses, no tonal whine (loops seamlessly)."""
     n = int(RATE * seconds)
     sin = _SIN
-    out, hiss = [], 0.0
+    out, low, mid = [], 0.0, 0.0
     for i in range(n):
-        hiss += (rng.uniform(-1, 1) - hiss) * 0.2
-        pulse = 1.0 + 0.35 * sin[(14 * i) % RATE]
-        whine = 0.5 * sin[(190 * i) % RATE] + 0.25 * sin[(380 * i) % RATE] + 0.12 * sin[(570 * i) % RATE]
-        out.append(whine * pulse + hiss * 0.25)
-    tail = 200                                           # tiny crossfade for the noise at the seam
+        w = rng.uniform(-1, 1)
+        low += (w - low) * 0.03
+        mid += (w - mid) * 0.15
+        pulse = 1.0 + 0.5 * sin[(14 * i) % RATE]
+        out.append((low * 4.0 + mid * 0.6) * pulse)
+    tail = 200                                           # tiny fade so the loop joins without a click
     for i in range(tail):
         out[i] *= i / tail
         out[n - 1 - i] *= i / tail
@@ -132,21 +132,8 @@ def make_roll(rng, seconds=1.0):
             for i in range(n)]
 
 
-def make_squeal(rng, seconds=1.0):
-    """Tyre squeal: a wavering, raspy tone (loops seamlessly)."""
-    n = int(RATE * seconds)
-    sin = _SIN
-    out, hiss = [], 0.0
-    for i in range(n):
-        hiss += (rng.uniform(-1, 1) - hiss) * 0.5
-        bend = 1.0 + 0.04 * sin[(5 * i) % RATE]
-        tone = sin[(int(1150 * bend) * i) % RATE] * 0.6 + sin[(int(2310 * bend) * i) % RATE] * 0.25
-        out.append(tone * (0.7 + 0.3 * sin[(23 * i) % RATE]) + hiss * 0.3)
-    return out
-
-
 def make_touchdown(rng, seconds=0.9):
-    """Wheels meeting the runway: a thump and a short tyre chirp."""
+    """Wheels meeting the runway: a thump and a short burst of tyre noise."""
     n = int(RATE * seconds)
     sin = _SIN
     out, hiss = [], 0.0
@@ -154,13 +141,14 @@ def make_touchdown(rng, seconds=0.9):
         t = i / RATE
         hiss += (rng.uniform(-1, 1) - hiss) * 0.3
         thump = math.sin(2 * math.pi * (70 * t - 60 * t * t)) * math.exp(-t / 0.12) * 1.3
-        chirp = (sin[(1000 * i) % RATE] * 0.5 + hiss * 0.6) * math.exp(-t / 0.22) * min(1.0, t / 0.01)
+        chirp = hiss * 0.8 * math.exp(-t / 0.22) * min(1.0, t / 0.01)
         out.append(thump + chirp * 0.7)
     return out
 
 
 # Engine sound profiles: three looped layers (idle / cruise / full power) are cross-faded by throttle.
-# "piston": harmonics of a firing frequency (Hz); "turbine": a whine (Hz) over rushing noise.
+# "piston": harmonics of a firing frequency (Hz); "turbine": rushing noise (a whine tone can be
+# added with `whine` in Hz, but every profile currently has it off).
 ENGINES = {
     "prop": dict(kind="piston", gain=0.30, layers=(
         dict(f=30, harm=(1.0, 0.7, 0.5, 0.35, 0.2), noise=0.10, trem=(7, 0.15)),
@@ -171,9 +159,9 @@ ENGINES = {
         dict(f=36, harm=(0.6, 1.0, 0.85, 0.55, 0.3), noise=0.22, trem=(6, 0.25)),
         dict(f=58, harm=(0.6, 1.0, 0.9, 0.6, 0.35), noise=0.28, trem=(9, 0.18)))),
     "jet": dict(kind="turbine", gain=0.26, layers=(
-        dict(whine=700, hiss=0.15, rumble=0.9),
-        dict(whine=1100, hiss=0.35, rumble=0.9),
-        dict(whine=1600, hiss=0.7, rumble=1.0))),
+        dict(whine=0, hiss=0.15, rumble=0.9),
+        dict(whine=0, hiss=0.35, rumble=0.9),
+        dict(whine=0, hiss=0.7, rumble=1.0))),
     "airliner": dict(kind="turbine", gain=0.24, layers=(
         dict(whine=0, hiss=0.10, rumble=1.0),        # no whine: just a deep rumble and rushing air
         dict(whine=0, hiss=0.22, rumble=1.0),
@@ -311,7 +299,7 @@ class Sounds:
             self._loops[name] = None
 
     def gear(self, gear, dt, quiet=False):
-        """Hydraulic whirr while the gear moves, and a clunk when it locks down or tucks up."""
+        """Mechanical grind while the gear moves, and a clunk when it locks down or tucks up."""
         if not self.ok or self.muted:
             return
         prev, self._prev_gear = self._prev_gear, gear
@@ -323,14 +311,12 @@ class Sounds:
                 snd.set_volume(0.8 if gear >= 1.0 else 0.6)
                 snd.play()
 
-    def wheels(self, on_ground, speed, braking, dt, quiet=False):
-        """Tyre rumble that grows with ground speed, and a squeal when braking hard."""
+    def wheels(self, on_ground, speed, dt, quiet=False):
+        """Tyre rumble that grows with ground speed."""
         if not self.ok or self.muted:
             return
         rolling = on_ground and not quiet
         self._loop("wheel_roll", make_roll, min(speed / 45.0, 1.0) * 0.45 if rolling else 0.0, dt)
-        squeal = rolling and braking and speed > 8.0
-        self._loop("wheel_squeal", make_squeal, min(speed / 40.0, 1.0) * 0.18 if squeal else 0.0, dt, rate=12.0)
 
     def wing_snap(self):
         if self.ok and not self.muted:
@@ -339,7 +325,7 @@ class Sounds:
             snd.play()
 
     def touchdown(self, sink_rate=1.0):
-        """Thump and tyre chirp on a safe landing; a firmer landing is louder."""
+        """Thump and tyre noise on a safe landing; a firmer landing is louder."""
         if self.ok and not self.muted:
             snd = self._sound("touchdown", make_touchdown)
             snd.set_volume(max(0.35, min(1.0, 0.35 + sink_rate / 6.0)))

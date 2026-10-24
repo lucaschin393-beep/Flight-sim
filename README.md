@@ -42,7 +42,7 @@ Prefer `W` = climb? Set `INVERT_PITCH = True` in `sim/config.py`.
 | `3` | Falcon jet | Very fast, snappy roll, high landing speed; afterburner flame and roar |
 | `4` | Atlas airliner | Big, heavy, sluggish; needs wide turns and gentle inputs |
 
-Each aircraft has its own engine sound (buzzy prop, lumpy radial, turbine whine, whine-free airliner rumble) whose pitch and loudness follow the throttle. You also hear the gear's hydraulic whirr and a clunk as it locks, tyre rumble while rolling, a squeal under hard braking, and a thump and chirp on touchdown.
+Each aircraft has its own engine sound (buzzy prop, lumpy radial, rushing turbine roar, deep airliner rumble) whose pitch and loudness follow the throttle. You also hear the gear's mechanical grind and a clunk as it locks, tyre rumble while rolling, and a thump on touchdown; none of the sounds whine.
 
 Switching mid-flight keeps your position and attitude (not available after a crash or landing).
 
