@@ -53,7 +53,8 @@ def _cluster(polys, count, rng):
 class Piece:
     """A chunk of the broken plane: a rigid group of polygons that tumbles and lands."""
 
-    def __init__(self, polys, origin, velocity, rng, intensity, inherit, drag=0.0, burn=True):
+    def __init__(self, polys, origin, velocity, rng, intensity, inherit, drag=0.0, burn=True,
+                 water_at=None):
         verts = [v for p in polys for v in p[0]]
         self.center = tuple(sum(v[i] for v in verts) / len(verts) for i in range(3))
         self.rel = [([tuple(v[i] - self.center[i] for i in range(3)) for v in p[0]], p[1], p[2])
@@ -67,11 +68,23 @@ class Piece:
         self.rot = [[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0]]
         self.bounces, self.resting, self.age = 0, False, 0.0
         self.burning = burn and rng.random() < 0.5
-        self.drag, self.burn = drag, burn
+        self.drag, self.burn, self.water_at = drag, burn, water_at
+        self.sinking = self.sunk = False
 
     def update(self, dt):
         self.age += dt
         if self.resting:
+            return
+        if self.sinking:                                               # settling slowly under the surface
+            (cx, cy, cz), (vx, vy, vz) = self.center, self.vel
+            damp = max(0.0, 1.0 - 2.0 * dt)
+            self.vel = (vx * damp, 0.0, vz * damp)
+            self.center = (cx + vx * dt, cy - 2.2 * dt, cz + vz * dt)
+            w = math.sqrt(sum(c * c for c in self.spin))
+            if w > 1e-6:
+                self.rot = _rot_mul(_axis_angle(self.spin, w * dt), self.rot)
+            if cy < -self.radius * 1.2:
+                self.sunk = self.resting = True
             return
         vx, vy, vz = self.vel
         vy -= 24.0 * dt
@@ -85,7 +98,10 @@ class Piece:
         if w > 1e-6:
             self.rot = _rot_mul(_axis_angle(self.spin, w * dt), self.rot)
         low = self.center[1] + min(_apply(self.rot, v)[1] for poly in self.rel for v in poly[0])
-        if low < 0.0:                                                  # hit the ground
+        if low < 0.0 and self.water_at and self.water_at(self.center[0], self.center[2]):
+            self.sinking, self.spin = True, tuple(c * 0.3 for c in self.spin)      # splashes down
+            self.vel = (self.vel[0] * 0.3, 0.0, self.vel[2] * 0.3)
+        elif low < 0.0:                                                # hit the ground
             cx, cy, cz = self.center
             self.center = (cx, cy - low, cz)
             vx, vy, vz = self.vel
@@ -97,6 +113,8 @@ class Piece:
                 self.spin = tuple(c * 0.5 for c in self.spin)
 
     def polys(self):
+        if self.sunk:
+            return []
         # fire chars the paint (a wing that just broke off isn't burning)
         soot = min(self.age / 4.0, 1.0) * 0.8 if self.burn else 0.0
         out = []
@@ -116,7 +134,8 @@ class _Particle:
 
 
 class Explosion:
-    def __init__(self, pos, velocity, scale=1.0, rng=None, polys=None, intensity=1.0):
+    def __init__(self, pos, velocity, scale=1.0, rng=None, polys=None, intensity=1.0, water=False,
+                 water_at=None, water_color=(40, 100, 160)):
         """`polys`: the plane's world-space mesh, broken into tumbling wreckage.
         `intensity` (~0.3 slow bump .. 1.3 high-speed impact) scales the blast."""
         self.rng = rng or random.Random()
@@ -124,19 +143,29 @@ class Explosion:
         self.velocity = tuple(c * 0.3 for c in velocity)      # wreckage keeps some momentum
         self.scale = max(scale, 1.0)
         self.intensity = intensity
+        self.water, self.water_color = water, water_color
         self.age = 0.0
         self.particles = []
-        for _ in range(int(70 * intensity)):
-            self._spawn("fire", speed=(8, 40 * intensity), life=(0.6, 1.6), radius=(2.5, 6.0 * intensity))
-        for _ in range(40):
-            self._spawn("smoke", speed=(3, 18), life=(2.5, 5.5), radius=(2.0, 4.5))
-        for _ in range(int(40 * intensity)):
-            self._spawn("debris", speed=(20, 65 * intensity), life=(3.0, 5.0), radius=(0.35, 0.9))
+        if water:                                         # a splash and spray instead of a fireball
+            for _ in range(int(90 * intensity)):
+                self._spawn("spray", speed=(10, 45 * intensity), life=(0.8, 2.0), radius=(1.2, 3.5))
+            for _ in range(24):
+                self._spawn("mist", speed=(2, 9), life=(1.5, 3.2), radius=(3.0, 7.0))
+            for _ in range(int(14 * intensity)):
+                self._spawn("debris", speed=(10, 35 * intensity), life=(2.0, 3.5), radius=(0.35, 0.8))
+        else:
+            for _ in range(int(70 * intensity)):
+                self._spawn("fire", speed=(8, 40 * intensity), life=(0.6, 1.6), radius=(2.5, 6.0 * intensity))
+            for _ in range(40):
+                self._spawn("smoke", speed=(3, 18), life=(2.5, 5.5), radius=(2.0, 4.5))
+            for _ in range(int(40 * intensity)):
+                self._spawn("debris", speed=(20, 65 * intensity), life=(3.0, 5.0), radius=(0.35, 0.9))
         self.pieces = []
         if polys:
             for group in _cluster(polys, 16, self.rng):
                 if group:
-                    self.pieces.append(Piece(group, self.pos, velocity, self.rng, intensity, 0.45))
+                    self.pieces.append(Piece(group, self.pos, velocity, self.rng, intensity, 0.45,
+                                        burn=not water, water_at=water_at))
         blob = [self.rng.uniform(0.7, 1.3) for _ in range(14)]         # irregular scorch outline
         self._scorch = [(math.cos(2 * math.pi * i / 14) * r, math.sin(2 * math.pi * i / 14) * r)
                         for i, r in enumerate(blob)]
@@ -155,11 +184,13 @@ class Explosion:
 
     @property
     def done(self):
-        return self.age > SMOULDER + 6.0
+        return self.age > (9.0 if self.water else SMOULDER + 6.0)
 
     def update(self, dt):
         self.age += dt
-        if self.age < LINGER:                                          # the wreck keeps burning
+        if self.water:
+            pass                                                       # no fire on the water
+        elif self.age < LINGER:                                        # the wreck keeps burning
             if self.rng.random() < 60 * dt:
                 self._spawn("fire", (1, 6), (0.5, 1.1), (1.0, 2.2), jitter=0.8)
             if self.rng.random() < 35 * dt:
@@ -177,7 +208,12 @@ class Explosion:
                 continue
             x, y, z = p.pos
             vx, vy, vz = p.vel
-            if p.kind == "debris":
+            if p.kind == "spray":                                      # water thrown up falls back
+                vy -= 22.0 * dt
+                x, y, z = x + vx * dt, y + vy * dt, z + vz * dt
+                if y < 0.2:
+                    continue
+            elif p.kind == "debris":
                 vy -= 28.0 * dt
                 x, y, z = x + vx * dt, y + vy * dt, z + vz * dt
                 if y <= p.radius:                                      # lands and skids to a stop
@@ -207,6 +243,10 @@ class Explosion:
             sx, sy = cam.project(cam.to_camera(p.pos))
             if p.kind == "debris":
                 r, color, alpha = p.radius, p.color, 255
+            elif p.kind == "spray":
+                r, color, alpha = p.radius * (1.0 - 0.3 * t), (226, 240, 250), int(235 * (1 - t * t))
+            elif p.kind == "mist":
+                r, color, alpha = p.radius * (1.0 + 1.2 * t), (205, 222, 236), int(110 * (1 - t))
             elif p.kind == "fire":
                 r, color, alpha = p.radius * (0.6 + 0.8 * t), _ramp(FIRE, t), 255
             else:
@@ -235,9 +275,14 @@ class Explosion:
         return [poly for piece in self.pieces for poly in piece.polys()]
 
     def ground_decals(self):
-        """Scorch mark that grows then stays, plus a brief expanding dust ring: (verts, colour, None)."""
+        """Scorch mark that grows then stays, plus a brief expanding dust ring: (verts, colour, None).
+
+        On water: a few ripple rings of foam spreading out and fading instead.
+        """
         x, _, z = self.pos
         size = 12.0 * self.scale * self.intensity
+        if self.water:
+            return self._ripples(x, z, size)
         grow = min(self.age / 0.6, 1.0)
         out = [([(x + px * size * grow, 0.12, z + pz * size * grow) for px, pz in self._scorch],
                 (38, 46, 36), None)]
@@ -245,13 +290,32 @@ class Explosion:
             r0, r1 = size * 3.2 * self.age, size * 3.2 * self.age + size * 0.5
             fade = self.age / 1.1
             color = tuple(int(a + (b - a) * fade) for a, b in ((196, 90), (184, 88), (160, 84)))
-            for i in range(20):
-                a0, a1 = 2 * math.pi * i / 20, 2 * math.pi * (i + 1) / 20
-                out.append(([(x + math.cos(a) * r, 0.14, z + math.sin(a) * r)
-                             for a, r in ((a0, r0), (a1, r0), (a1, r1), (a0, r1))], color, None))
+            out += self._ring(x, z, r0, r1, color)
+        return out
+
+    @staticmethod
+    def _ring(x, z, r0, r1, color, segments=20):
+        out = []
+        for i in range(segments):
+            a0, a1 = 2 * math.pi * i / segments, 2 * math.pi * (i + 1) / segments
+            out.append(([(x + math.cos(a) * r, 0.14, z + math.sin(a) * r)
+                         for a, r in ((a0, r0), (a1, r0), (a1, r1), (a0, r1))], color, None))
+        return out
+
+    def _ripples(self, x, z, size):
+        out = []
+        for k in range(4):                                             # rings leave one after another
+            t = self.age - k * 0.45
+            if 0 < t < 3.2:
+                r0 = size * 0.9 * t
+                fade = t / 3.2
+                foam = (232, 242, 250)
+                color = tuple(int(a + (b - a) * fade) for a, b in zip(foam, self.water_color))
+                out += self._ring(x, z, r0, r0 + size * 0.22, color, 24)
         return out
 
     def camera_shake(self):
         """Offset for the camera: a hard jolt that dies away over ~0.9 s."""
         k = max(0.0, 1.0 - self.age / 0.9) ** 2 * 1.6 * self.scale ** 0.5 * self.intensity
+        k *= 0.5 if self.water else 1.0
         return tuple(self.rng.uniform(-1, 1) * k for _ in range(3))

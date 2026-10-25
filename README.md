@@ -28,6 +28,7 @@ python3 -m venv .venv
 | `P` | Change view (3rd person ⇄ 1st person) |
 | `R` | Restart (after a safe landing: carry on from where you landed, ready to taxi and take off) |
 | `M` | Mute / unmute sound |
+| `N` (or `F1`–`F5`) | Change map |
 | `H` | Show / hide the help text |
 | `Esc` | Quit |
 
@@ -46,6 +47,22 @@ Each aircraft has its own engine sound (buzzy prop, lumpy radial, rushing turbin
 
 Switching mid-flight keeps your position and attitude (not available after a crash or landing).
 
+## Maps
+
+Press `N` to cycle maps (or `F1`–`F5` to pick one). Switching restarts you at the runway,
+which is always on dry land, in the same aircraft.
+
+| Key | Map | Look |
+|-----|-----|------|
+| `F1` | Home Fields | The original green plains, no water |
+| `F2` | Emerald Lakes | Green hills dotted with lakes |
+| `F3` | Island Chain | A warm sea scattered with islands; the runway is on one |
+| `F4` | Sunset Coast | Dry shores in the west, open ocean to the east, a few ponds |
+| `F5` | Frozen Fjords | Snowy highlands cut by long, dark fjords and lakes |
+
+Water is not landable: touching it (landing, or taxiing into it) is a crash, with a splash
+instead of a fireball, and the wreck sinks. Each map has its own ground, sky and tree colours.
+
 ## Flying tips
 
 - You start airborne over the runway's start, heading north.
@@ -62,7 +79,7 @@ Switching mid-flight keeps your position and attitude (not available after a cra
   steer with `A`/`D`, brake with `B`, and pull back (`S`) above the rotate speed shown on screen.
   Ground speed is capped at 300 km/h.
   Crashing or restarting mid-flight sends you back to the start.
-- Touch down gently, on the runway or anywhere else on open ground (level wings, low speed, slow descent) to **land**.
+- Touch down gently, on the runway or anywhere else on open dry ground (level wings, low speed, slow descent) to **land**.
   Hitting the ground too fast or unlevel, or touching a mountain, building or tree with the body, tail, propeller or wheels is a
   **crash**. Clipping with just a **wing** snaps that wing off instead: it tumbles away, you keep
   flying, but the plane rolls and turns toward the missing side and sinks, and aileron input
@@ -78,6 +95,7 @@ sim/config.py      tunable settings (speeds, fog, window size, pitch inversion)
 sim/aircraft.py    the four aircraft: handling numbers, mesh, camera offsets
 sim/plane.py       flight model + the plane's low-poly mesh in world space
 sim/camera.py      1st-person and chase cameras, projection
+sim/maps.py       the maps: where the seas and lakes are, colours, sky
 sim/world.py       runway and chunked procedural world with collisions
 sim/renderer.py    projection, near/screen clipping, fog, painter's algorithm
 sim/meshes.py      box / cone / airplane shape builders

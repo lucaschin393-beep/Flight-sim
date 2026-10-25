@@ -2,6 +2,7 @@
 import math
 import random
 
+from .maps import MAPS
 from .meshes import box, cone
 
 CHUNK = 1600.0
@@ -31,12 +32,12 @@ def runway_polys():
     return out
 
 
-def _mountain(rng, x, z):
+def _mountain(rng, x, z, rock=((118, 108, 96), (104, 96, 86)), cap=(245, 247, 250)):
     radius = rng.uniform(300, 700)
     height = rng.uniform(250, 600)
-    body = cone(x, 0, z, radius, height, 8, [(118, 108, 96), (104, 96, 86)])
+    body = cone(x, 0, z, radius, height, 8, list(rock))
     cap_h = height * 0.28
-    cap = cone(x, height - cap_h, z, radius * 0.28 * 1.04, cap_h * 1.01, 8, [(245, 247, 250)])
+    cap = cone(x, height - cap_h, z, radius * 0.28 * 1.04, cap_h * 1.01, 8, [cap])
 
     def hit(p):
         r = math.hypot(p[0] - x, p[2] - z)
@@ -56,7 +57,7 @@ def _building(rng, x, z):
     return Obj(box(x, h / 2, z, sx, h, sz, color), (x, h / 2, z), math.hypot(sx, sz, h), hit)
 
 
-def _tree(rng, x, z):
+def _tree(rng, x, z, tint=(40, 1.0, 55)):
     h = rng.uniform(10, 22)
     g = rng.randint(80, 130)
     base = h * 0.35
@@ -64,32 +65,45 @@ def _tree(rng, x, z):
     def hit(p):
         return 0.0 <= p[1] < h and math.hypot(p[0] - x, p[2] - z) < base * (1.0 - p[1] / h)
 
-    return Obj(cone(x, 0, z, base, h, 4, [(40, g, 55), (30, g - 15, 45)]), (x, h / 2, z), h, hit)
+    return Obj(cone(x, 0, z, base, h, 4,
+                          [(tint[0], min(255, int(g * tint[1])), tint[2]),
+                           (tint[0] - 10, min(255, int((g - 15) * tint[1])), tint[2] - 10)]), (x, h / 2, z), h, hit)
 
 
 class World:
-    def __init__(self, seed=7):
-        self.seed = seed
+    def __init__(self, seed=None, game_map=None):
+        self.map = game_map or MAPS[0]
+        self.seed = self.map.seed if seed is None else seed
         self._chunks = {}
         self.runway = runway_polys()
+
+    def water_at(self, x, z):
+        return self.map.water_at(x, z)
 
     def _generate(self, cx, cz):
         rng = random.Random(self.seed * 1_000_003 + cx * 7919 + cz * 104729)
         x0, z0 = cx * CHUNK, cz * CHUNK
-        objs = []
+        m, objs = self.map, []
 
         def spot():
-            while True:
+            """A random dry spot away from the runway, or None if none was found."""
+            for _ in range(30):
                 x, z = x0 + rng.uniform(0, CHUNK), z0 + rng.uniform(0, CHUNK)
-                if abs(x) > 140 or abs(z) > RUNWAY_HALF_LENGTH + 200:
+                if (abs(x) > 140 or abs(z) > RUNWAY_HALF_LENGTH + 200) and not m.water_at(x, z):
                     return x, z
+            return None
 
-        if rng.random() < 0.4:
-            objs.append(_mountain(rng, *spot()))
-        for _ in range(rng.randint(2, 5)):
-            objs.append(_building(rng, *spot()))
-        for _ in range(8):
-            objs.append(_tree(rng, *spot()))
+        def add(make, *extra):
+            where = spot()
+            if where:
+                objs.append(make(rng, *where, *extra))
+
+        if rng.random() < m.mountains:
+            add(_mountain, m.rock, m.cap)
+        for _ in range(rng.randint(*m.buildings)):
+            add(_building)
+        for _ in range(m.trees):
+            add(_tree, m.tree_tint)
         return objs
 
     def _chunk(self, cx, cz):

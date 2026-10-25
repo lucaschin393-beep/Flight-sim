@@ -14,6 +14,7 @@ HELP = [
     "G   landing gear up / down",
     "B (hold)   air brake - slows you down",
     "C or 1-4   change aircraft",
+    "N or F1-F5   change map",
     "Space   pause / resume",
     "P   change view      R   restart",
     "M   mute sound       H   hide help",
@@ -57,7 +58,7 @@ class Hud:
         pygame.draw.line(surface, (255, 255, 255), (cx - 30, cy), (cx - 8, cy), 1)
         pygame.draw.line(surface, (255, 255, 255), (cx + 8, cy), (cx + 30, cy), 1)
 
-    def draw(self, surface, plane, view_name, status):
+    def draw(self, surface, plane, view_name, status, map_name=""):
         kmh = plane.speed * 3.6
         line = "SPD %3d km/h    ALT %4d m    HDG %03d    VS %+d m/s" % (
             kmh, plane.altitude, plane.heading_degrees, plane.vertical_speed)
@@ -66,6 +67,9 @@ class Hud:
                    (self.w - 16, 12), anchor="topright")
         self._text(surface, self.font, "%s  (C to change)" % plane.spec.name,
                    (self.w - 16, 36), anchor="topright")
+        if map_name:
+            self._text(surface, self.font, "Map: %s  (N to change)" % map_name,
+                       (self.w - 16, 60), anchor="topright")
 
         # throttle bar
         bx, by, bw, bh = 16, self.h - 40, 200, 16
@@ -124,7 +128,7 @@ class Hud:
              WARN if fast else GOOD),
             ("sink under %d m/s  (now %d)" % (cfg.LAND_MAX_SINK, max(sink, 0)),
              WARN if sink >= cfg.LAND_MAX_SINK else GOOD),
-            ("wings and nose level - land anywhere", INK),
+            ("wings and nose level - dry land only", INK),
         ]
         for i, (text, color) in enumerate(rows):
             self._text(surface, self.small, text, (x, y + i * 20), color)

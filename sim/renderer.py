@@ -5,14 +5,14 @@ import pygame
 
 from . import config as cfg
 from .vec import dot, normalize, sub
+from .maps import CELL, MAPS
 from .world import runway_polys
 
 NEAR = 0.5
 LIGHT = normalize((0.4, 0.8, -0.3))
 SUN_FOR_SHADOW = (0.15, 1.0, -0.1)     # steeper than LIGHT so the shadow stays close below you
-TILE = 400.0
+TILE = 400.0                           # must match sim.maps.TILE
 TILE_RADIUS = 7
-TILE_COLORS = ((98, 150, 92), (90, 140, 84))
 
 
 def clip_near(poly):
@@ -56,12 +56,12 @@ def clip_screen(pts, w, h):
     return pts
 
 
-def apply_fog(color, depth):
+def apply_fog(color, depth, fog=cfg.FOG_COLOR):
     t = (depth - cfg.FOG_START) / (cfg.FOG_END - cfg.FOG_START)
     if t <= 0:
         return color
     t = min(t, 1.0)
-    return tuple(int(c + (f - c) * t) for c, f in zip(color, cfg.FOG_COLOR))
+    return tuple(int(c + (f - c) * t) for c, f in zip(color, fog))
 
 
 def shade(color, normal):
@@ -72,15 +72,22 @@ def shade(color, normal):
 class Renderer:
     def __init__(self, width, height):
         self.w, self.h = width, height
-        self.sky = self._make_sky()
+        self.time = 0.0                      # seconds, makes the water shimmer
+        self.set_map(MAPS[0])
         self.runway = runway_polys()
+
+    def set_map(self, game_map):
+        """Switch sky, fog and ground colours to a map's."""
+        self.map = game_map
+        self.fog = game_map.horizon
+        self.sky = self._make_sky()
 
     def _make_sky(self):
         surf = pygame.Surface((self.w, self.h))
         horizon = self.h // 2
         for y in range(self.h):
             t = min(1.0, y / float(horizon))
-            color = tuple(int(a + (b - a) * t) for a, b in zip(cfg.SKY_TOP, cfg.SKY_HORIZON))
+            color = tuple(int(a + (b - a) * t) for a, b in zip(self.map.sky_top, self.map.horizon))
             pygame.draw.line(surf, color, (0, y), (self.w, y))
         return surf
 
@@ -107,7 +114,7 @@ class Renderer:
             if r is None or r[0] > cfg.FOG_END:
                 continue
             color = shade(poly[1], poly[2]) if lit and poly[2] is not None else poly[1]
-            items.append((r[0], apply_fog(color, r[0]), r[1]))
+            items.append((r[0], apply_fog(color, r[0], self.fog), r[1]))
         return items
 
     @staticmethod
@@ -118,13 +125,22 @@ class Renderer:
             pygame.draw.polygon(surface, color, pts)
 
     # -- scene -----------------------------------------------------------
+    def _shimmer(self, cell, x, z):
+        """Water slowly glints; land is left as it is."""
+        color, is_water = cell
+        if not is_water:
+            return color
+        k = 7.0 * math.sin(self.time * 0.9 + x * 0.004 + z * 0.0031) + 3.0 * math.sin(self.time * 1.7 + z * 0.006)
+        return tuple(max(0, min(255, int(c + k))) for c in color)
+
     def _ground(self, surface, cam):
         px, pz = cam.pos[0], cam.pos[2]
         big = 60000.0
         base = [(px - big, 0, pz - big), (px + big, 0, pz - big),
                 (px + big, 0, pz + big), (px - big, 0, pz + big)]
-        self._paint(surface, self._items(cam, [(base, cfg.GROUND_FAR, None)], False))
+        self._paint(surface, self._items(cam, [(base, self.map.far, None)], False))
 
+        reach = max(cam.cx, cam.cy) / cam.focal * 1.15      # sideways extent of the view per metre ahead
         ix, iz = int(math.floor(px / TILE)), int(math.floor(pz / TILE))
         tiles = []
         for dx in range(-TILE_RADIUS, TILE_RADIUS + 1):
@@ -132,11 +148,21 @@ class Renderer:
                 x0, z0 = (ix + dx) * TILE, (iz + dz) * TILE
                 center = (x0 + TILE / 2, 0, z0 + TILE / 2)
                 d = sub(center, cam.pos)
-                if dot(d, cam.fwd) < -TILE:        # behind the camera
+                ahead = dot(d, cam.fwd)
+                if ahead < -TILE:                  # behind the camera
                     continue
-                color = TILE_COLORS[(ix + dx + iz + dz) & 1]
-                tiles.append(([(x0, 0, z0), (x0 + TILE, 0, z0), (x0 + TILE, 0, z0 + TILE),
-                               (x0, 0, z0 + TILE)], color, None))
+                if abs(dot(d, cam.right)) > ahead * reach + TILE * 1.5:   # outside the view sideways
+                    continue
+                cells = self.map.tile(ix + dx, iz + dz)
+                if len(cells) == 1:
+                    tiles.append(([(x0, 0, z0), (x0 + TILE, 0, z0), (x0 + TILE, 0, z0 + TILE),
+                                   (x0, 0, z0 + TILE)], self._shimmer(cells[0], x0, z0), None))
+                    continue
+                n = int(TILE / CELL)                    # a shoreline tile: draw its 100 m cells
+                for k, cell in enumerate(cells):
+                    cx0, cz0 = x0 + (k % n) * CELL, z0 + (k // n) * CELL
+                    tiles.append(([(cx0, 0, cz0), (cx0 + CELL, 0, cz0), (cx0 + CELL, 0, cz0 + CELL),
+                                   (cx0, 0, cz0 + CELL)], self._shimmer(cell, cx0, cz0), None))
         self._paint(surface, self._items(cam, tiles, False))
 
     def _draw_shadow(self, surface, cam, plane):

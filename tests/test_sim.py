@@ -235,6 +235,68 @@ class WingLossTests(unittest.TestCase):
         self.assertEqual(p.collision_result(hits), ("wing", "right"))
 
 
+class MapTests(unittest.TestCase):
+    def test_there_are_five_maps_and_four_new_ones_have_water(self):
+        from sim.maps import MAPS
+        self.assertEqual(len(MAPS), 5)
+        self.assertFalse(MAPS[0].has_water())
+        for m in MAPS[1:]:
+            frac = m.water_fraction(extent=9000.0, step=300.0)
+            self.assertGreater(frac, 0.1, m.name)
+            self.assertLess(frac, 0.8, m.name)
+        self.assertEqual(len({m.name for m in MAPS}), 5)
+
+    def test_runway_and_start_are_always_dry(self):
+        from sim.maps import MAPS
+        for m in MAPS:
+            for x in range(-300, 301, 50):
+                for z in range(-1100, 1101, 50):
+                    self.assertFalse(m.water_at(float(x), float(z)), (m.name, x, z))
+
+    def test_water_is_deterministic_and_matches_the_drawn_tiles(self):
+        from sim.maps import CELL, MAPS
+        m = MAPS[2]
+        self.assertEqual([m.water_at(x * 137.0, 3000.0) for x in range(40)],
+                         [m.water_at(x * 137.0, 3000.0) for x in range(40)])
+        for tx in range(-4, 5):
+            for tz in range(4, 12):
+                cells = m.tile(tx, tz)
+                if len(cells) == 1:
+                    self.assertEqual(cells[0][1], m.water_at(tx * 400.0 + 200, tz * 400.0 + 200))
+                else:
+                    for k, cell in enumerate(cells):
+                        x = tx * 400.0 + (k % 4) * CELL + CELL / 2
+                        z = tz * 400.0 + (k // 4) * CELL + CELL / 2
+                        self.assertEqual(cell[1], m.water_at(x, z))
+
+    def test_nothing_is_built_in_the_water(self):
+        from sim.maps import MAPS
+        w = World(game_map=MAPS[2])
+        count = 0
+        for obj in w.nearby_objects((0.0, 50.0, 0.0)):
+            x, _, z = obj.center
+            if obj.hit and obj.radius < 200:                          # trees and buildings
+                count += 1
+                self.assertFalse(w.water_at(x, z))
+        self.assertGreater(count, 10)
+
+    def test_classic_map_world_is_unchanged(self):
+        a = list(World().nearby_objects((100, 50, 100)))
+        b = list(World(seed=7).nearby_objects((100, 50, 100)))
+        self.assertEqual([o.center for o in a], [o.center for o in b])
+
+    def test_pieces_sink_in_water(self):
+        import random
+        from sim.explosion import Explosion
+        ex = Explosion((0, 3, 0), (0, 0, 40), 1.0, random.Random(3), polys=Plane().world_polys(),
+                       intensity=1.0, water=True, water_at=lambda x, z: True)
+        for _ in range(60 * 12):
+            ex.update(1 / 60.0)
+        self.assertTrue(all(pc.sunk for pc in ex.pieces))
+        self.assertEqual(ex.wreckage_polys(), [])
+        self.assertTrue(ex.done)
+
+
 class ExplosionTests(unittest.TestCase):
     def test_explosion_spawns_debris_burns_then_finishes(self):
         import random

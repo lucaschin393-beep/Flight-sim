@@ -97,6 +97,25 @@ def make_snap(rng, seconds=0.8):
     return out
 
 
+def make_splash(rng, seconds=1.8):
+    """A plane hitting water: a heavy slap, a rush of spray and bubbling."""
+    n = int(RATE * seconds)
+    out, a, b = [], 0.0, 0.0
+    for i in range(n):
+        t = i / RATE
+        w = rng.uniform(-1, 1)
+        a += (w - a) * 0.25
+        b += (w - b) * 0.04
+        slap = math.sin(2 * math.pi * (60 * t - 35 * t * t)) * math.exp(-t / 0.1) * 1.4
+        rush = (a * 0.6 + b * 3.0) * math.exp(-t / 0.55) * min(1.0, t / 0.02)
+        bubble = b * 2.0 * (1.0 if (i // 700) % 2 else 0.3) * math.exp(-t / 0.9)
+        out.append(slap + rush + bubble)
+    fade = int(RATE * 0.2)
+    for i in range(fade):
+        out[n - 1 - i] *= i / fade
+    return out
+
+
 def make_gear_motor(rng, seconds=1.0):
     """Gear in motion: a low mechanical grind with pump pulses, no tonal whine (loops seamlessly)."""
     n = int(RATE * seconds)
@@ -230,9 +249,15 @@ class Sounds:
         except Exception:                                    # no audio device, mixer missing, ...
             self.ok = False
 
-    def crash(self, intensity=1.0):
-        """Boom now, and a crackling fire loop that fades out as the wreck burns down."""
+    def crash(self, intensity=1.0, water=False):
+        """Boom now and a crackling fire loop that fades as the wreck burns down; or a splash."""
         if not self.ok:
+            return
+        if water:
+            if not self.muted:
+                snd = self._sound("splash", make_splash)
+                snd.set_volume(max(0.35, min(1.0, intensity)))
+                snd.play()
             return
         self._boom.set_volume(0 if self.muted else max(0.3, min(1.0, intensity)))
         self._boom.play()
