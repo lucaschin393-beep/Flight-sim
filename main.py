@@ -161,7 +161,7 @@ def main():
         quiet = paused or status is not None
         sounds.engine(plane.spec.engine, plane.throttle, dt, quiet)
         sounds.gear(plane.gear, dt, quiet)
-        sounds.wheels(plane.on_ground, plane.speed, dt, quiet)
+        sounds.wheels(plane.wheels_rolling, plane.speed, dt, quiet)
         sounds.afterburner(0.0 if quiet else plane.spec.exhaust_power(plane.throttle), dt)
 
         view = VIEWS[view_index]

@@ -394,6 +394,39 @@ class SoundTests(unittest.TestCase):
         self.assertAlmostEqual(AIRCRAFT[2].exhaust_power(1.0), 1.0)
 
 
+class TyreNoiseTests(unittest.TestCase):
+    def test_tyres_only_roll_on_the_ground_with_gear_down(self):
+        p = Plane()
+        self.assertFalse(p.wheels_rolling)                 # airborne at the start
+        p.toggle_gear()
+        fly(p, 3)
+        self.assertTrue(p.gear_locked_down)
+        self.assertFalse(p.wheels_rolling)                 # gear down but flying: silent
+        q = Plane()
+        q.reset_at((0.0, 0.0, 0.0), 0.0)
+        self.assertTrue(q.wheels_rolling)                  # parked on the runway
+        for _ in range(60 * 30):
+            q.update(1 / 60.0, 1 if q.speed > q.spec.rotate_speed else 0, 0, 1)
+            if not q.on_ground:
+                break
+        self.assertFalse(q.wheels_rolling)                 # the moment the wheels leave the ground
+        fly(q, 0.2, throttle=1)
+        self.assertFalse(q.wheels_rolling)
+
+    def test_tyre_loop_stops_quickly_in_the_air(self):
+        from sim.sound import Sounds
+        s = Sounds()
+        if not s.ok:
+            self.skipTest("no audio device")
+        for _ in range(120):
+            s.wheels(True, 50.0, 1 / 60.0)
+        self.assertGreater(s._loop_levels["wheel_roll"], 0.3)
+        for _ in range(30):                                # half a second airborne
+            s.wheels(False, 50.0, 1 / 60.0)
+        self.assertLess(s._loop_levels["wheel_roll"], 0.01)
+        self.assertIsNone(s._loops.get("wheel_roll"))
+
+
 class AircraftTests(unittest.TestCase):
     def test_every_aircraft_flies_level_and_has_geometry(self):
         for spec in AIRCRAFT:

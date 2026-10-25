@@ -57,6 +57,12 @@ class Plane:
     def gear_locked_down(self):
         return self.gear >= 1.0
 
+    @property
+    def wheels_rolling(self):
+        """True only when the tyres are really on the ground: down and locked, and at ground height."""
+        return (self.on_ground and self.gear_locked_down
+                and self.pos[1] <= self.spec.ground_clearance + 0.3)
+
     def toggle_gear(self):
         """Raise/lower the gear. Returns False if refused (can't retract on the ground)."""
         if self.on_ground and self.gear_down:

@@ -336,12 +336,13 @@ class Sounds:
                 snd.set_volume(0.8 if gear >= 1.0 else 0.6)
                 snd.play()
 
-    def wheels(self, on_ground, speed, dt, quiet=False):
-        """Tyre rumble that grows with ground speed."""
+    def wheels(self, rolling, speed, dt, quiet=False):
+        """Tyre rumble that grows with ground speed. `rolling` must mean the tyres are on the ground
+        (see Plane.wheels_rolling); it cuts off almost at once the moment they leave it."""
         if not self.ok or self.muted:
             return
-        rolling = on_ground and not quiet
-        self._loop("wheel_roll", make_roll, min(speed / 45.0, 1.0) * 0.45 if rolling else 0.0, dt)
+        target = min(speed / 45.0, 1.0) * 0.45 if rolling and not quiet else 0.0
+        self._loop("wheel_roll", make_roll, target, dt, rate=8.0 if target else 30.0)
 
     def wing_snap(self):
         if self.ok and not self.muted:
